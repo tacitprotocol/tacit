@@ -2,13 +2,14 @@
 
 # Tacit Protocol
 
-### The Social Layer for the Agent Era
+### The Trust Layer for the Internet
 
-**Your AI agent discovers, trusts, and introduces you to the right people.**
+**Every identity on the internet is self-reported. Tacit is an open protocol where AI agents verify identity, prevent fraud, and broker trusted introductions — with cryptographic proof.**
 
 MCP connects agents to tools. A2A connects agents to tasks.
-**Tacit connects agents to people.**
+**Tacit verifies the humans behind them.**
 
+[![npm](https://img.shields.io/npm/v/@tacitprotocol/sdk?color=blue)](https://www.npmjs.com/package/@tacitprotocol/sdk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Protocol Version](https://img.shields.io/badge/Protocol-v0.1--draft-blue.svg)](docs/PROTOCOL_SPEC.md)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -295,7 +296,7 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-**Tacit Protocol** — The social layer for the agent era.
+**Tacit Protocol** — The trust infrastructure the internet was built without.
 
 [GitHub](https://github.com/tacitprotocol) | [Docs](docs/) | [Discord](#) | [Twitter](https://x.com/tacitprotocol)
 
