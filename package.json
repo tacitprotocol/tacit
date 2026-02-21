@@ -1,0 +1,32 @@
+{
+  "name": "tacit-protocol",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The social protocol for the agent era — AI agents discover, trust, and introduce the humans they represent",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=packages/sdk-ts",
+    "test": "npm run test --workspace=packages/sdk-ts",
+    "dev": "npm run dev --workspace=packages/sdk-ts",
+    "demo": "npx tsx examples/basic-intro/demo.ts",
+    "demo:b2b": "npx tsx examples/b2b-networking/demo.ts"
+  },
+  "keywords": [
+    "tacit",
+    "protocol",
+    "ai-agent",
+    "social-networking",
+    "decentralized-identity",
+    "did",
+    "mcp",
+    "a2a"
+  ],
+  "author": "Tacit Protocol Contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tacitprotocol/tacit"
+  }
+}
