@@ -5,7 +5,6 @@
  * for Tacit agents. Uses did:key method for simplicity in v0.1.
  */
 
-import { v4 as uuidv4 } from 'uuid';
 import type { AgentIdentity, DID } from '../types/index.js';
 
 /**
@@ -24,8 +23,9 @@ export async function generateKeypair(): Promise<{
     ['sign', 'verify']
   );
 
-  const publicKeyBuffer = await crypto.subtle.exportKey('raw', keyPair.publicKey);
-  const privateKeyBuffer = await crypto.subtle.exportKey('pkcs8', keyPair.privateKey);
+  const pair = keyPair as { publicKey: CryptoKey; privateKey: CryptoKey };
+  const publicKeyBuffer = await crypto.subtle.exportKey('raw', pair.publicKey);
+  const privateKeyBuffer = await crypto.subtle.exportKey('pkcs8', pair.privateKey);
 
   return {
     publicKey: new Uint8Array(publicKeyBuffer),
@@ -92,13 +92,13 @@ export function resolveDid(did: DID): { publicKey: Uint8Array } | null {
 export async function sign(data: Uint8Array, privateKey: Uint8Array): Promise<Uint8Array> {
   const key = await crypto.subtle.importKey(
     'pkcs8',
-    privateKey,
+    privateKey.buffer as ArrayBuffer,
     { name: 'Ed25519' },
     false,
     ['sign']
   );
 
-  const signature = await crypto.subtle.sign('Ed25519', key, data);
+  const signature = await crypto.subtle.sign('Ed25519', key, data.buffer as ArrayBuffer);
   return new Uint8Array(signature);
 }
 
@@ -112,13 +112,13 @@ export async function verify(
 ): Promise<boolean> {
   const key = await crypto.subtle.importKey(
     'raw',
-    publicKey,
+    publicKey.buffer as ArrayBuffer,
     { name: 'Ed25519' },
     false,
     ['verify']
   );
 
-  return crypto.subtle.verify('Ed25519', key, signature, data);
+  return crypto.subtle.verify('Ed25519', key, signature.buffer as ArrayBuffer, data.buffer as ArrayBuffer);
 }
 
 // ─── Base58btc Encoding (simplified) ──────────────────────────────

@@ -5,12 +5,10 @@
  * on the Tacit network.
  */
 
-import { v4 as uuidv4 } from 'uuid';
 import type {
   Intent,
   IntentType,
   IntentStatus,
-  IntentFilters,
   DomainType,
   PrivacyLevel,
   DID,
@@ -140,7 +138,7 @@ export class IntentStore {
     const now = Date.now();
     const active: Intent[] = [];
 
-    for (const [id, entry] of this.intents) {
+    for (const [, entry] of this.intents) {
       if (entry.status !== 'active') continue;
 
       // Check TTL

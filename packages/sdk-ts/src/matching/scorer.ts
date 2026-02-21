@@ -9,7 +9,6 @@ import type {
   Intent,
   AgentCard,
   MatchResult,
-  MatchScore,
   MatchAction,
   AuthenticityVector,
 } from '../types/index.js';
