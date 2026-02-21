@@ -91,7 +91,7 @@ export class TacitAgent {
     }
   }
 
-  // ─── Static Factory ───────────────────────────────────────────
+  // ─── Static Factories ──────────────────────────────────────────
 
   /**
    * Create a new agent identity.
@@ -101,12 +101,47 @@ export class TacitAgent {
     return createIdentity();
   }
 
+  /**
+   * Convenience factory: creates a new identity and returns a ready-to-use agent.
+   */
+  static async create(options: {
+    domain?: DomainType;
+    preferences?: Record<string, any>;
+    seeking?: string;
+    offering?: string;
+  } = {}): Promise<TacitAgent> {
+    const identity = await TacitAgent.createIdentity();
+    return new TacitAgent({
+      identity,
+      profile: {
+        name: 'Tacit Agent',
+        domain: options.domain || 'professional',
+        seeking: options.seeking || '',
+        offering: options.offering || '',
+      },
+      preferences: options.preferences as any,
+    });
+  }
+
+  // ─── Convenience Getters ─────────────────────────────────────
+
+  /** Get the agent's DID (shorthand). */
+  get did(): string {
+    return this.getDid();
+  }
+
+  /** Get the agent's Agent Card (shorthand). */
+  get card(): AgentCard {
+    return this.getAgentCard();
+  }
+
   // ─── Lifecycle ────────────────────────────────────────────────
 
   /**
    * Connect the agent to the Tacit network via a relay node.
+   * Pass `{ demo: true }` to simulate a match after 3 seconds (no relay needed).
    */
-  async connect(): Promise<void> {
+  async connect(options?: { demo?: boolean }): Promise<void> {
     if (!this.identity) {
       this.identity = await createIdentity();
     }
@@ -121,6 +156,34 @@ export class TacitAgent {
       type: 'connection:established',
       endpoint: this.config.relayUrl!,
     });
+
+    // Demo mode: simulate a match after 3 seconds
+    if (options?.demo) {
+      setTimeout(async () => {
+        const simulatedMatch: MatchResult = {
+          matchId: `match:demo:${Date.now()}`,
+          agents: {
+            initiator: this.identity!.did,
+            responder: 'did:key:z6MkdemoAgent00000000000000000000000000000000' as any,
+          },
+          score: {
+            overall: 87,
+            breakdown: {
+              intentAlignment: 0.92,
+              domainFit: 0.88,
+              authenticityCompatibility: 0.85,
+              preferenceMatch: 0.82,
+              timingFit: 0.90,
+            },
+          },
+          timestamp: new Date().toISOString(),
+        };
+        await this.events.emit({ type: 'match', match: simulatedMatch });
+      }, 3000);
+
+      // Keep the process alive
+      await new Promise(() => {});
+    }
   }
 
   /**

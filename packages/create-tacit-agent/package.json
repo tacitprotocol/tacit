@@ -1,9 +1,10 @@
 {
   "name": "create-tacit-agent",
-  "version": "0.1.0",
+  "version": "0.1.3",
   "description": "Create a new Tacit Protocol agent in one command",
+  "main": "./dist/index.js",
   "bin": {
-    "create-tacit-agent": "./dist/index.js"
+    "create-tacit-agent": "dist/index.js"
   },
   "files": [
     "dist",

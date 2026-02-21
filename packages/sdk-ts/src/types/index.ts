@@ -248,6 +248,7 @@ export interface ServiceAttestation {
 export type TacitEvent =
   | { type: 'intent:published'; intent: Intent }
   | { type: 'intent:matched'; match: MatchResult }
+  | { type: 'match'; match: MatchResult }
   | { type: 'intent:expired'; intentId: string }
   | { type: 'proposal:received'; proposal: IntroProposal }
   | { type: 'proposal:accepted'; proposal: IntroProposal }
