@@ -1,0 +1,42 @@
+{
+  "name": "create-tacit-agent",
+  "version": "0.1.0",
+  "description": "Create a new Tacit Protocol agent in one command",
+  "bin": {
+    "create-tacit-agent": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "templates"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs --target node18 --clean",
+    "dev": "tsup src/index.ts --format cjs --target node18 --watch"
+  },
+  "keywords": [
+    "tacit",
+    "protocol",
+    "agent",
+    "ai-agent",
+    "create",
+    "cli",
+    "did",
+    "identity",
+    "trust"
+  ],
+  "author": "Tacit Protocol Contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tacitprotocol/tacit",
+    "directory": "packages/create-tacit-agent"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "tsup": "^8.0.0",
+    "@types/node": "^20.11.0"
+  }
+}
