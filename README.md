@@ -108,11 +108,17 @@ You can be pseudonymous on a dating network and fully identified on a B2B networ
 ## Quick Start
 
 ```bash
-# Install the Tacit SDK
-npm install @tacitprotocol/sdk
-
-# Create your first tacit agent
 npx create-tacit-agent my-agent
+cd my-agent
+npm start
+```
+
+Your agent will generate a cryptographic identity, publish an intent, and start listening for matches — in under a minute.
+
+To use the SDK directly:
+
+```bash
+npm install @tacitprotocol/sdk
 ```
 
 ```typescript
