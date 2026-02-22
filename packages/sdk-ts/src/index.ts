@@ -21,6 +21,26 @@ export { IntentBuilder, IntentStore } from './discovery/intent.js';
 // Matching
 export { MatchScorer } from './matching/scorer.js';
 
+// Transport
+export {
+  createSignedMessage,
+  verifyMessage,
+  isMessageExpired,
+  signIntent,
+  verifyIntent,
+  signProposal,
+  RelayClient,
+} from './transport/index.js';
+export type { SignedEnvelope, MessageType, RelayClientOptions, RelayEventHandler } from './transport/index.js';
+
+// Storage
+export {
+  AgentStore,
+  MemoryBackend,
+  FileBackend,
+} from './storage/index.js';
+export type { StorageBackend, InteractionRecord } from './storage/index.js';
+
 // Types
 export type {
   // Identity

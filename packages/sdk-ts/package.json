@@ -1,6 +1,6 @@
 {
   "name": "@tacitprotocol/sdk",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "The Tacit Protocol SDK — verify identity, prevent fraud, and broker trusted introductions with cryptographic proof",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

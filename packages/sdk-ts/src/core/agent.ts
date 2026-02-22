@@ -8,6 +8,9 @@
 import { v4 as uuidv4 } from 'uuid';
 import { createIdentity } from '../identity/did.js';
 import { AuthenticityEngine } from '../identity/authenticity.js';
+import { RelayClient } from '../transport/relay-client.js';
+import { signIntent, signProposal } from '../transport/message.js';
+import { AgentStore, MemoryBackend } from '../storage/store.js';
 import type {
   AgentIdentity,
   AgentCard,
@@ -20,7 +23,9 @@ import type {
   DomainType,
   AuthenticityVector,
   PrivacyLevel,
+  RelayConfig,
 } from '../types/index.js';
+import type { StorageBackend } from '../storage/store.js';
 
 // ─── Event Emitter ────────────────────────────────────────────────
 
@@ -69,8 +74,10 @@ export class TacitAgent {
   private intents = new Map<string, Intent>();
   private proposals = new Map<string, IntroProposal>();
   private connected = false;
+  private relay: RelayClient | null = null;
+  private store: AgentStore;
 
-  constructor(config: TacitConfig) {
+  constructor(config: TacitConfig & { storage?: StorageBackend }) {
     this.config = {
       relayUrl: 'wss://relay.tacitprotocol.dev',
       matchThresholds: {
@@ -89,6 +96,8 @@ export class TacitAgent {
     if (config.identity) {
       this.identity = config.identity;
     }
+
+    this.store = new AgentStore(config.storage ?? new MemoryBackend());
   }
 
   // ─── Static Factories ──────────────────────────────────────────
@@ -109,9 +118,10 @@ export class TacitAgent {
     preferences?: Record<string, any>;
     seeking?: string;
     offering?: string;
+    storage?: StorageBackend;
   } = {}): Promise<TacitAgent> {
     const identity = await TacitAgent.createIdentity();
-    return new TacitAgent({
+    const agent = new TacitAgent({
       identity,
       profile: {
         name: 'Tacit Agent',
@@ -120,7 +130,28 @@ export class TacitAgent {
         offering: options.offering || '',
       },
       preferences: options.preferences as any,
+      storage: options.storage,
     });
+
+    // Persist the identity
+    await agent.store.saveIdentity(identity);
+
+    return agent;
+  }
+
+  /**
+   * Load an existing agent from storage.
+   */
+  static async load(storage: StorageBackend, config?: Partial<TacitConfig>): Promise<TacitAgent | null> {
+    const store = new AgentStore(storage);
+    const identity = await store.loadIdentity();
+    if (!identity) return null;
+
+    return new TacitAgent({
+      ...config,
+      identity,
+      storage,
+    } as TacitConfig & { storage: StorageBackend });
   }
 
   // ─── Convenience Getters ─────────────────────────────────────
@@ -141,24 +172,20 @@ export class TacitAgent {
    * Connect the agent to the Tacit network via a relay node.
    * Pass `{ demo: true }` to simulate a match after 3 seconds (no relay needed).
    */
-  async connect(options?: { demo?: boolean }): Promise<void> {
+  async connect(options?: { demo?: boolean; relay?: RelayConfig }): Promise<void> {
     if (!this.identity) {
       this.identity = await createIdentity();
+      await this.store.saveIdentity(this.identity);
     }
 
-    // TODO: Establish WebSocket connection to relay node
-    // TODO: Publish Agent Card to the network
-    // TODO: Subscribe to intent matches
-
-    this.connected = true;
-
-    await this.events.emit({
-      type: 'connection:established',
-      endpoint: this.config.relayUrl!,
-    });
-
-    // Demo mode: simulate a match after 3 seconds
     if (options?.demo) {
+      // Demo mode: simulate a match after 3 seconds
+      this.connected = true;
+      await this.events.emit({
+        type: 'connection:established',
+        endpoint: 'demo://local',
+      });
+
       setTimeout(async () => {
         const simulatedMatch: MatchResult = {
           matchId: `match:demo:${Date.now()}`,
@@ -183,17 +210,45 @@ export class TacitAgent {
 
       // Keep the process alive
       await new Promise(() => {});
+      return;
+    }
+
+    // Real connection via relay
+    const relayConfig: RelayConfig = options?.relay ?? {
+      url: this.config.relayUrl!,
+      maxRetries: 5,
+      retryDelayMs: 1000,
+      heartbeatIntervalMs: 30000,
+    };
+
+    this.relay = new RelayClient({
+      config: relayConfig,
+      identity: this.identity,
+      onEvent: async (event) => {
+        await this.handleRelayEvent(event);
+      },
+    });
+
+    await this.relay.connect();
+    this.connected = true;
+
+    // Publish our Agent Card to the network
+    await this.relay.publishCard(this.getAgentCard());
+
+    // Re-publish active intents
+    for (const intent of this.intents.values()) {
+      await this.relay.publishIntent(intent);
     }
   }
 
   /**
    * Disconnect the agent from the network.
-   * Active intents remain on the network until their TTL expires.
    */
   async disconnect(): Promise<void> {
-    // TODO: Close WebSocket connection
-    // TODO: Optionally withdraw all active intents
-
+    if (this.relay) {
+      await this.relay.disconnect();
+      this.relay = null;
+    }
     this.connected = false;
   }
 
@@ -202,6 +257,14 @@ export class TacitAgent {
    */
   isConnected(): boolean {
     return this.connected;
+  }
+
+  /**
+   * Gracefully shut down — disconnect and close storage.
+   */
+  async shutdown(): Promise<void> {
+    await this.disconnect();
+    await this.store.close();
   }
 
   // ─── Identity ─────────────────────────────────────────────────
@@ -265,9 +328,9 @@ export class TacitAgent {
     return this.authenticityEngine.computeVector({
       agentCreatedDate: this.identity.created,
       consistencySignals: {
-        intentStability: 1.0, // New agent, no changes yet
+        intentStability: 1.0,
         profileConsistency: 1.0,
-        responseReliability: 0.5, // No track record
+        responseReliability: 0.5,
         interactionQuality: 0.5,
       },
       credentials: [],
@@ -280,6 +343,36 @@ export class TacitAgent {
       },
       lastActiveDate: new Date(),
     });
+  }
+
+  /**
+   * Recompute authenticity from stored interaction history.
+   */
+  async recomputeAuthenticity(): Promise<AuthenticityVector> {
+    if (!this.identity) throw new Error('Agent has no identity.');
+
+    const [credentials, stats] = await Promise.all([
+      this.store.getCredentials(),
+      this.store.getInteractionStats(),
+    ]);
+
+    const vector = this.authenticityEngine.computeVector({
+      agentCreatedDate: this.identity.created,
+      consistencySignals: {
+        intentStability: 1.0,
+        profileConsistency: 1.0,
+        responseReliability: stats.totalInteractions > 0 ? 0.8 : 0.5,
+        interactionQuality: stats.totalInteractions > 0
+          ? stats.positiveInteractions / stats.totalInteractions
+          : 0.5,
+      },
+      credentials,
+      networkSignals: stats,
+      lastActiveDate: new Date(),
+    });
+
+    await this.store.saveTrustSnapshot(vector);
+    return vector;
   }
 
   // ─── Intents ──────────────────────────────────────────────────
@@ -301,7 +394,7 @@ export class TacitAgent {
   }): Promise<Intent> {
     if (!this.identity) throw new Error('Agent has no identity. Call connect() first.');
 
-    const intent: Intent = {
+    let intent: Intent = {
       id: `intent:${this.identity.did.split(':').pop()}:${Date.now()}`,
       agentDid: this.identity.did,
       type: params.type,
@@ -316,14 +409,20 @@ export class TacitAgent {
         excludedDomains: [],
       },
       privacyLevel: params.privacyLevel ?? 'filtered',
-      ttl: params.ttlSeconds ?? 604800, // 7 days default
+      ttl: params.ttlSeconds ?? 604800,
       created: new Date().toISOString(),
-      signature: '', // TODO: Sign with agent's private key
+      signature: '',
     };
+
+    // Sign the intent with the agent's private key
+    intent = await signIntent(this.identity, intent);
 
     this.intents.set(intent.id, intent);
 
-    // TODO: Broadcast to relay node
+    // Broadcast to relay if connected
+    if (this.relay?.isConnected) {
+      await this.relay.publishIntent(intent);
+    }
 
     await this.events.emit({ type: 'intent:published', intent });
 
@@ -339,7 +438,9 @@ export class TacitAgent {
 
     this.intents.delete(intentId);
 
-    // TODO: Notify relay node of withdrawal
+    if (this.relay?.isConnected) {
+      await this.relay.withdrawIntent(intentId);
+    }
   }
 
   /**
@@ -353,19 +454,15 @@ export class TacitAgent {
 
   /**
    * Handle an incoming match from the network.
-   * Called when another agent's intent is compatible with ours.
    */
   async handleMatch(match: MatchResult): Promise<void> {
     const thresholds = this.config.matchThresholds!;
 
     if (match.score.overall >= thresholds.autoPropose) {
-      // Auto-propose introduction
       await this.proposeIntro(match);
     } else if (match.score.overall >= thresholds.suggest) {
-      // Suggest to human for review
       await this.events.emit({ type: 'intent:matched', match });
     }
-    // Below suggest threshold: ignore
   }
 
   /**
@@ -374,7 +471,7 @@ export class TacitAgent {
   async proposeIntro(match: MatchResult): Promise<IntroProposal> {
     if (!this.identity) throw new Error('Agent has no identity.');
 
-    const proposal: IntroProposal = {
+    let proposal: IntroProposal = {
       id: `proposal:${uuidv4()}`,
       type: 'introduction',
       initiator: {
@@ -392,7 +489,7 @@ export class TacitAgent {
       match: {
         score: match.score.overall,
         rationale: this.generateRationale(match),
-        domain: 'professional', // TODO: derive from intent
+        domain: 'professional',
       },
       terms: {
         initialReveal: 'pseudonymous',
@@ -402,27 +499,31 @@ export class TacitAgent {
       },
       status: 'pending',
       created: new Date().toISOString(),
-      signature: '', // TODO: Sign
+      signature: '',
     };
 
-    this.proposals.set(proposal.id, proposal);
+    // Sign the proposal
+    proposal = await signProposal(this.identity, proposal);
 
-    // TODO: Send proposal to responder via relay
+    this.proposals.set(proposal.id, proposal);
+    await this.store.saveProposal(proposal);
+
+    // Send via relay
+    if (this.relay?.isConnected) {
+      await this.relay.sendProposal(proposal, match.agents.responder);
+    }
 
     return proposal;
   }
 
   /**
    * Accept an introduction proposal.
-   * This is the human's explicit consent (one half of double opt-in).
    */
   async acceptProposal(proposalId: string): Promise<void> {
     const proposal = this.proposals.get(proposalId);
     if (!proposal) throw new Error(`Proposal ${proposalId} not found`);
-
     if (!this.identity) throw new Error('Agent has no identity.');
 
-    // Determine which side we are
     const isInitiator = proposal.initiator.agentDid === this.identity.did;
 
     if (isInitiator) {
@@ -431,22 +532,44 @@ export class TacitAgent {
       proposal.status = 'accepted_by_responder';
     }
 
-    // TODO: Send acceptance to the other party via relay
+    await this.store.saveProposal(proposal);
+
+    // Notify the other party via relay
+    if (this.relay?.isConnected) {
+      const otherDid = isInitiator ? proposal.responder.agentDid : proposal.initiator.agentDid;
+      await this.relay.acceptProposal(proposalId, otherDid);
+    }
+
     await this.events.emit({ type: 'proposal:accepted', proposal });
+
+    // Record positive interaction
+    await this.store.recordInteraction({
+      withDid: isInitiator ? proposal.responder.agentDid : proposal.initiator.agentDid,
+      type: 'introduction',
+      outcome: 'positive',
+      timestamp: new Date().toISOString(),
+      proposalId,
+    });
   }
 
   /**
    * Decline an introduction proposal.
-   * The other party receives a generic "not a match" response.
    */
   async declineProposal(proposalId: string): Promise<void> {
     const proposal = this.proposals.get(proposalId);
     if (!proposal) throw new Error(`Proposal ${proposalId} not found`);
+    if (!this.identity) throw new Error('Agent has no identity.');
 
     proposal.status = 'declined';
     this.proposals.delete(proposalId);
 
-    // TODO: Send generic decline to the other party via relay
+    // Notify the other party via relay (generic decline — no reason given)
+    if (this.relay?.isConnected) {
+      const isInitiator = proposal.initiator.agentDid === this.identity.did;
+      const otherDid = isInitiator ? proposal.responder.agentDid : proposal.initiator.agentDid;
+      await this.relay.declineProposal(proposalId, otherDid);
+    }
+
     await this.events.emit({ type: 'proposal:declined', proposalId });
   }
 
@@ -460,28 +583,52 @@ export class TacitAgent {
 
   // ─── Events ───────────────────────────────────────────────────
 
-  /**
-   * Subscribe to specific event types.
-   */
   on(type: string, handler: EventHandler): void {
     this.events.on(type, handler);
   }
 
-  /**
-   * Subscribe to all events.
-   */
   onAny(handler: EventHandler): void {
     this.events.onAny(handler);
   }
 
-  /**
-   * Unsubscribe from an event type.
-   */
   off(type: string, handler: EventHandler): void {
     this.events.off(type, handler);
   }
 
-  // ─── Helpers ──────────────────────────────────────────────────
+  // ─── Internal ─────────────────────────────────────────────────
+
+  private async handleRelayEvent(event: TacitEvent): Promise<void> {
+    switch (event.type) {
+      case 'match':
+        await this.handleMatch((event as { type: 'match'; match: MatchResult }).match);
+        break;
+
+      case 'proposal:received': {
+        const proposal = (event as { type: 'proposal:received'; proposal: IntroProposal }).proposal;
+        this.proposals.set(proposal.id, proposal);
+        await this.store.saveProposal(proposal);
+        await this.events.emit(event);
+        break;
+      }
+
+      case 'proposal:accepted':
+      case 'proposal:declined':
+        await this.events.emit(event);
+        break;
+
+      case 'connection:lost':
+        this.connected = false;
+        await this.events.emit(event);
+        break;
+
+      case 'error':
+        await this.events.emit(event);
+        break;
+
+      default:
+        await this.events.emit(event);
+    }
+  }
 
   private generateRationale(match: MatchResult): string {
     const parts: string[] = [];
