@@ -2,7 +2,9 @@
 
 # Tacit Protocol
 
-### The Trust Layer for the Internet
+### **T**rusted **A**gent **C**ryptographic **I**dentity **T**okens
+
+The Trust Layer for the Internet
 
 **Every identity on the internet is self-reported. Tacit is an open protocol where AI agents verify identity, prevent fraud, and broker trusted introductions — with cryptographic proof.**
 
