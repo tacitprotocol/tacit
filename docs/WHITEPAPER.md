@@ -1,5 +1,7 @@
 # Tacit: The Social Protocol for the Agent Era
 
+> **TACIT** — **T**rusted **A**gent **C**ryptographic **I**dentity **T**okens
+
 **A Whitepaper by Muttee Sheikh**
 **Version 0.1 — February 2026**
 
