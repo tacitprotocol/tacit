@@ -35,3 +35,9 @@ yarn-error.log*
 # Lock files (keep package-lock.json if using npm)
 yarn.lock
 pnpm-lock.yaml
+
+# Internal planning & notes
+TODO.md
+NOTES.md
+planning/
+*.private.md
