@@ -1,0 +1,363 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { createClient } from '@/lib/supabase/client';
+import { IndexedDBBackend } from '@/lib/tacit/indexed-db-backend';
+import {
+  createTacitIdentity,
+  serializeIdentity,
+  type TacitIdentity,
+} from '@/lib/tacit/identity';
+import {
+  Shield,
+  Fingerprint,
+  CheckCircle2,
+  Loader2,
+  ArrowRight,
+  Github,
+  Mail,
+  Sparkles,
+} from 'lucide-react';
+
+type Step = 'accounts' | 'minting' | 'complete';
+
+export default function OnboardingPage() {
+  const router = useRouter();
+  const supabase = createClient();
+  const [step, setStep] = useState<Step>('accounts');
+  const [user, setUser] = useState<{ id: string; email?: string; user_metadata?: Record<string, unknown> } | null>(null);
+  const [identity, setIdentity] = useState<TacitIdentity | null>(null);
+  const [trustScore, setTrustScore] = useState(0);
+  const [connectedProviders, setConnectedProviders] = useState<string[]>([]);
+  const [displayName, setDisplayName] = useState('');
+  const [bio, setBio] = useState('');
+
+  useEffect(() => {
+    async function init() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.replace('/login');
+        return;
+      }
+      setUser(user);
+
+      // Extract connected providers from user metadata
+      const providers: string[] = [];
+      if (user.app_metadata?.provider) {
+        providers.push(user.app_metadata.provider as string);
+      }
+      setConnectedProviders(providers);
+
+      // Set default display name from user metadata
+      const name = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Tacit User';
+      setDisplayName(name as string);
+
+      // Calculate initial trust score based on connected providers
+      const baseScore = providers.length * 15 + 10;
+      setTrustScore(Math.min(baseScore, 100));
+    }
+    init();
+  }, [router, supabase]);
+
+  async function connectProvider(provider: 'google' | 'github') {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: `${window.location.origin}/onboarding`,
+        queryParams: provider === 'google' ? { access_type: 'offline', prompt: 'consent' } : {},
+      },
+    });
+    if (error) console.error('Provider link error:', error);
+  }
+
+  async function mintIdentity() {
+    if (!user) return;
+    setStep('minting');
+
+    try {
+      // Generate Ed25519 key pair on-device
+      const newIdentity = await createTacitIdentity();
+      setIdentity(newIdentity);
+
+      // Store private key in IndexedDB (never leaves the browser)
+      const storage = new IndexedDBBackend(`tacit-${user.id}`);
+      await storage.set('identity', serializeIdentity(newIdentity));
+      await storage.close();
+
+      // Calculate trust score from connected accounts
+      const accountAge = user.user_metadata?.created_at
+        ? Math.floor((Date.now() - new Date(user.user_metadata.created_at as string).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
+        : 0;
+      const tenureScore = Math.min(accountAge * 5, 30);
+      const platformScore = connectedProviders.length * 15;
+      const finalScore = Math.min(10 + tenureScore + platformScore, 100);
+      setTrustScore(finalScore);
+
+      // Determine trust level
+      let trustLevel = 'new';
+      if (finalScore >= 80) trustLevel = 'exemplary';
+      else if (finalScore >= 60) trustLevel = 'trusted';
+      else if (finalScore >= 40) trustLevel = 'established';
+      else if (finalScore >= 20) trustLevel = 'emerging';
+
+      // Save profile to Supabase
+      const { error } = await supabase.from('profiles').upsert({
+        id: user.id,
+        did: newIdentity.did,
+        public_key_hex: newIdentity.publicKeyHex,
+        display_name: displayName,
+        bio: bio || null,
+        avatar_url: (user.user_metadata?.avatar_url as string) || null,
+        domain: 'professional',
+        trust_score: finalScore,
+        trust_level: trustLevel,
+        onboarding_complete: true,
+      });
+
+      if (error) {
+        console.error('Profile save error:', error);
+        return;
+      }
+
+      // Save credential record for the OAuth provider
+      for (const provider of connectedProviders) {
+        await supabase.from('credentials').upsert({
+          user_id: user.id,
+          provider,
+          provider_user_id: user.user_metadata?.sub as string || user.id,
+          provider_email: user.email || null,
+          provider_name: displayName,
+          account_created_at: user.user_metadata?.created_at as string || null,
+          credential_type: 'PlatformVerification',
+          credential_json: {
+            type: 'PlatformVerification',
+            issuer: 'did:tacit:service',
+            claim: `Verified ${provider} account`,
+            issued: new Date().toISOString(),
+          },
+          verified_at: new Date().toISOString(),
+        }, { onConflict: 'user_id,provider' });
+      }
+
+      // Brief animation delay
+      await new Promise((r) => setTimeout(r, 2000));
+      setStep('complete');
+    } catch (err) {
+      console.error('Minting error:', err);
+      setStep('accounts');
+    }
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-bg flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-accent animate-spin" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-bg flex items-center justify-center px-6">
+      <div className="w-full max-w-lg">
+        {/* Progress */}
+        <div className="flex items-center justify-center gap-2 mb-10">
+          {(['accounts', 'minting', 'complete'] as Step[]).map((s, i) => (
+            <div key={s} className="flex items-center gap-2">
+              <div
+                className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors ${
+                  step === s
+                    ? 'bg-accent text-white'
+                    : ['accounts', 'minting', 'complete'].indexOf(step) > i
+                    ? 'bg-success text-white'
+                    : 'bg-bg-card text-text-muted border border-border'
+                }`}
+              >
+                {['accounts', 'minting', 'complete'].indexOf(step) > i ? (
+                  <CheckCircle2 className="w-4 h-4" />
+                ) : (
+                  i + 1
+                )}
+              </div>
+              {i < 2 && <div className="w-12 h-0.5 bg-border" />}
+            </div>
+          ))}
+        </div>
+
+        {/* Step 1: Connect Accounts */}
+        {step === 'accounts' && (
+          <div>
+            <div className="text-center mb-8">
+              <Shield className="w-12 h-12 text-accent mx-auto mb-4" />
+              <h1 className="text-2xl font-bold mb-2">Connect your accounts</h1>
+              <p className="text-text-muted">
+                Each account you connect proves part of your real identity and increases your trust score.
+              </p>
+            </div>
+
+            {/* Trust Score Preview */}
+            <div className="bg-bg-card border border-border rounded-xl p-6 mb-6">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm text-text-muted">Trust Score</span>
+                <span className="text-2xl font-bold text-accent">{trustScore}</span>
+              </div>
+              <div className="h-2 bg-bg rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-accent rounded-full transition-all duration-500"
+                  style={{ width: `${trustScore}%` }}
+                />
+              </div>
+              <p className="text-xs text-text-muted mt-2">
+                Connect more accounts to increase your score. Min 25 to join the network.
+              </p>
+            </div>
+
+            {/* Provider buttons */}
+            <div className="space-y-3 mb-6">
+              <button
+                onClick={() => connectProvider('google')}
+                className={`w-full flex items-center gap-3 px-5 py-3.5 rounded-xl font-medium transition-colors ${
+                  connectedProviders.includes('google')
+                    ? 'bg-success/10 border border-success/30 text-success'
+                    : 'bg-white text-gray-900 hover:bg-gray-100'
+                }`}
+                disabled={connectedProviders.includes('google')}
+              >
+                {connectedProviders.includes('google') ? (
+                  <CheckCircle2 className="w-5 h-5" />
+                ) : (
+                  <Mail className="w-5 h-5" />
+                )}
+                {connectedProviders.includes('google') ? 'Google Connected' : 'Connect Google'}
+              </button>
+
+              <button
+                onClick={() => connectProvider('github')}
+                className={`w-full flex items-center gap-3 px-5 py-3.5 rounded-xl font-medium transition-colors ${
+                  connectedProviders.includes('github')
+                    ? 'bg-success/10 border border-success/30 text-success'
+                    : 'bg-bg-card border border-border hover:border-border-bright text-text'
+                }`}
+                disabled={connectedProviders.includes('github')}
+              >
+                {connectedProviders.includes('github') ? (
+                  <CheckCircle2 className="w-5 h-5" />
+                ) : (
+                  <Github className="w-5 h-5" />
+                )}
+                {connectedProviders.includes('github') ? 'GitHub Connected' : 'Connect GitHub'}
+              </button>
+            </div>
+
+            {/* Display Name */}
+            <div className="mb-6">
+              <label className="block text-sm font-medium mb-2">Display Name</label>
+              <input
+                type="text"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                className="w-full bg-bg-card border border-border rounded-xl px-4 py-3 text-text focus:outline-none focus:border-accent"
+                placeholder="How others will see you"
+              />
+            </div>
+
+            <div className="mb-6">
+              <label className="block text-sm font-medium mb-2">Bio (optional)</label>
+              <textarea
+                value={bio}
+                onChange={(e) => setBio(e.target.value)}
+                rows={2}
+                className="w-full bg-bg-card border border-border rounded-xl px-4 py-3 text-text focus:outline-none focus:border-accent resize-none"
+                placeholder="What are you working on? What are you looking for?"
+              />
+            </div>
+
+            <button
+              onClick={mintIdentity}
+              disabled={connectedProviders.length === 0 || !displayName.trim()}
+              className="w-full flex items-center justify-center gap-2 bg-accent hover:bg-accent-bright disabled:opacity-50 disabled:cursor-not-allowed text-white px-5 py-3.5 rounded-xl font-medium transition-colors"
+            >
+              Mint My Identity
+              <Fingerprint className="w-5 h-5" />
+            </button>
+          </div>
+        )}
+
+        {/* Step 2: Minting */}
+        {step === 'minting' && (
+          <div className="text-center">
+            <div className="relative w-24 h-24 mx-auto mb-6">
+              <Fingerprint className="w-24 h-24 text-accent animate-pulse" />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <Loader2 className="w-8 h-8 text-accent-bright animate-spin" />
+              </div>
+            </div>
+            <h1 className="text-2xl font-bold mb-2">Minting your identity...</h1>
+            <p className="text-text-muted mb-4">
+              Generating Ed25519 key pair on your device.
+              <br />
+              Your private key never leaves this browser.
+            </p>
+            <div className="space-y-2 text-sm text-text-muted">
+              <p className="flex items-center justify-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-success" />
+                Key pair generated
+              </p>
+              <p className="flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Creating W3C DID...
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Step 3: Complete */}
+        {step === 'complete' && identity && (
+          <div className="text-center">
+            <Sparkles className="w-12 h-12 text-warning mx-auto mb-4" />
+            <h1 className="text-2xl font-bold mb-2">Identity minted!</h1>
+            <p className="text-text-muted mb-8">
+              Welcome to the TACIT network. Your cryptographic identity is ready.
+            </p>
+
+            {/* Identity Card Preview */}
+            <div className="bg-bg-card border border-accent/30 rounded-2xl p-6 mb-8 text-left">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Shield className="w-5 h-5 text-accent" />
+                  <span className="text-sm font-medium text-accent">TACIT Identity</span>
+                </div>
+                <span className="text-2xl font-bold">{trustScore}</span>
+              </div>
+              <h3 className="text-xl font-semibold mb-1">{displayName}</h3>
+              {bio && <p className="text-text-muted text-sm mb-3">{bio}</p>}
+              <div className="bg-bg rounded-lg p-3 mb-3">
+                <p className="text-xs text-text-muted mb-1">DID</p>
+                <p className="text-xs font-mono break-all">{identity.did}</p>
+              </div>
+              <div className="flex gap-2">
+                {connectedProviders.map((p) => (
+                  <span
+                    key={p}
+                    className="inline-flex items-center gap-1 text-xs bg-success/10 text-success px-2 py-1 rounded-full"
+                  >
+                    <CheckCircle2 className="w-3 h-3" />
+                    {p}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <button
+              onClick={() => router.push('/dashboard')}
+              className="w-full flex items-center justify-center gap-2 bg-accent hover:bg-accent-bright text-white px-5 py-3.5 rounded-xl font-medium transition-colors"
+            >
+              Enter the Network
+              <ArrowRight className="w-5 h-5" />
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

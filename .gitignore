@@ -43,3 +43,8 @@ planning/
 *.private.md
 docs/LAUNCH_STRATEGY.md
 docs/BLOG_POST.md
+# App-specific
+packages/app/.next/
+packages/app/node_modules/
+packages/app/.env.local
+
