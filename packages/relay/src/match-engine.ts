@@ -31,8 +31,19 @@ export interface RelayMatch {
   timestamp: string;
 }
 
-// Track which pairs we've already matched to avoid duplicates
-const matchedPairs = new Set<string>();
+// Track which pairs we've already matched to avoid duplicates, with timestamps for TTL cleanup
+const matchedPairs = new Map<string, number>();
+
+const MATCHED_PAIR_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function cleanupExpiredPairs(): void {
+  const now = Date.now();
+  for (const [key, timestamp] of matchedPairs) {
+    if (now - timestamp > MATCHED_PAIR_TTL_MS) {
+      matchedPairs.delete(key);
+    }
+  }
+}
 
 export class MatchEngine {
   private registry: AgentRegistry;
@@ -48,6 +59,9 @@ export class MatchEngine {
    * Returns new matches only (previously matched pairs are skipped).
    */
   findMatches(): RelayMatch[] {
+    // Clean up expired matched pairs before scanning
+    cleanupExpiredPairs();
+
     const active = this.intentIndex.getActive();
     if (active.length < 2) return [];
 
@@ -66,11 +80,12 @@ export class MatchEngine {
         const pairKey = [a.id, b.id].sort().join(':');
         if (matchedPairs.has(pairKey)) continue;
 
+
         const score = this.scoreMatch(a, b);
 
         // Minimum threshold: 60
         if (score.overall >= 60) {
-          matchedPairs.add(pairKey);
+          matchedPairs.set(pairKey, Date.now());
 
           matches.push({
             matchId: `match:${uuidv4()}`,

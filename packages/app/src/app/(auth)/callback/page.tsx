@@ -11,6 +11,18 @@ export default function CallbackPage() {
 
   useEffect(() => {
     async function handleCallback() {
+      // Handle OAuth hash fragment (Supabase returns tokens in the URL hash)
+      const hashParams = new URLSearchParams(window.location.hash.substring(1));
+      const accessToken = hashParams.get('access_token');
+      const refreshToken = hashParams.get('refresh_token');
+
+      if (accessToken && refreshToken) {
+        await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+      }
+
       const { data: { user }, error } = await supabase.auth.getUser();
 
       if (error || !user) {
@@ -18,12 +30,12 @@ export default function CallbackPage() {
         return;
       }
 
-      // Check if user has a profile already
+      // Check if user has a profile already — use maybeSingle to handle no-row case
       const { data: profile } = await supabase
         .from('profiles')
         .select('id, onboarding_complete')
         .eq('id', user.id)
-        .single();
+        .maybeSingle();
 
       if (profile?.onboarding_complete) {
         router.replace('/dashboard');

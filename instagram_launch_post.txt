@@ -1,0 +1,21 @@
+I've been working on something for months that I need to share.
+
+AI agents are about to run everything. CEOs, management, decision-makers. In 2-3 years, agents will be telling humans what to do.
+
+When that happens, identity becomes the biggest unsolved problem.
+
+The internet has no way to verify who anyone really is. Identity theft, romance scams, catfishing, fake credentials — all because profiles are self-reported and trivially forged.
+
+In a world where agents represent billions of people, this becomes existential. How do you trust the agent negotiating on your behalf? How do you find real people without spam and scams flooding the network?
+
+That's what I built.
+
+**Tacit Protocol** — an open-source identity and trust layer for the agent era. Cryptographic verification. AI-brokered introductions. No doxxing. No surveillance. Just verifiable trust.
+
+This isn't a product. It's a protocol I'm giving to the world. Open source. MIT license. For developers, agents, anyone who wants to solve trust without gatekeepers.
+
+Check it out: tacitprotocol.com
+
+If you know someone building AI agents or working on identity, send them this.
+
+#AIAgents #OpenSource #TrustProtocol #DecentralizedIdentity

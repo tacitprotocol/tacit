@@ -18,6 +18,7 @@ import type {
 import {
   createSignedMessage,
   verifyMessage,
+  isMessageExpired,
   type SignedEnvelope,
   type MessageType,
 } from './message.js';
@@ -179,6 +180,12 @@ export class RelayClient {
       envelope = JSON.parse(raw);
     } catch {
       console.error('[Tacit Relay] Failed to parse message:', raw.slice(0, 100));
+      return;
+    }
+
+    // Check expiration
+    if (isMessageExpired(envelope)) {
+      console.warn('[Tacit Relay] Expired message, skipping:', envelope.id);
       return;
     }
 

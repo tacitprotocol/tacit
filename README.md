@@ -306,7 +306,7 @@ MIT License. See [LICENSE](LICENSE) for details.
 
 **Tacit Protocol** — The trust infrastructure the internet was built without.
 
-[GitHub](https://github.com/tacitprotocol) | [Docs](docs/) | [Discord](#) | [Twitter](https://x.com/tacitprotocol)
+[GitHub](https://github.com/tacitprotocol) | [Docs](docs/) | [Twitter](https://x.com/tacitprotocol)
 
 *Built by humans who believe AI should connect us, not isolate us.*
 

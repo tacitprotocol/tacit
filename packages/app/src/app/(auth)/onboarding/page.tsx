@@ -18,20 +18,24 @@ import {
   Github,
   Mail,
   Sparkles,
+  AlertCircle,
 } from 'lucide-react';
 
-type Step = 'accounts' | 'minting' | 'complete';
+type Step = 'profile' | 'minting' | 'complete';
 
 export default function OnboardingPage() {
   const router = useRouter();
   const supabase = createClient();
-  const [step, setStep] = useState<Step>('accounts');
-  const [user, setUser] = useState<{ id: string; email?: string; user_metadata?: Record<string, unknown> } | null>(null);
+  const [step, setStep] = useState<Step>('profile');
+  const [user, setUser] = useState<{ id: string; email?: string; user_metadata?: Record<string, unknown>; app_metadata?: Record<string, unknown> } | null>(null);
   const [identity, setIdentity] = useState<TacitIdentity | null>(null);
-  const [trustScore, setTrustScore] = useState(0);
+  const [trustScore, setTrustScore] = useState(10);
   const [connectedProviders, setConnectedProviders] = useState<string[]>([]);
   const [displayName, setDisplayName] = useState('');
   const [bio, setBio] = useState('');
+  const [seeking, setSeeking] = useState('');
+  const [offering, setOffering] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function init() {
@@ -44,36 +48,27 @@ export default function OnboardingPage() {
 
       // Extract connected providers from user metadata
       const providers: string[] = [];
-      if (user.app_metadata?.provider) {
-        providers.push(user.app_metadata.provider as string);
+      const provider = user.app_metadata?.provider;
+      if (provider && provider !== 'email') {
+        providers.push(provider as string);
       }
       setConnectedProviders(providers);
 
-      // Set default display name from user metadata
+      // Set default display name
       const name = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Tacit User';
       setDisplayName(name as string);
 
-      // Calculate initial trust score based on connected providers
-      const baseScore = providers.length * 15 + 10;
+      // Calculate initial trust score
+      const baseScore = 10 + (providers.length * 15);
       setTrustScore(Math.min(baseScore, 100));
     }
     init();
   }, [router, supabase]);
 
-  async function connectProvider(provider: 'google' | 'github') {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: {
-        redirectTo: `${window.location.origin}/onboarding`,
-        queryParams: provider === 'google' ? { access_type: 'offline', prompt: 'consent' } : {},
-      },
-    });
-    if (error) console.error('Provider link error:', error);
-  }
-
   async function mintIdentity() {
-    if (!user) return;
+    if (!user || !displayName.trim()) return;
     setStep('minting');
+    setError(null);
 
     try {
       // Generate Ed25519 key pair on-device
@@ -85,13 +80,10 @@ export default function OnboardingPage() {
       await storage.set('identity', serializeIdentity(newIdentity));
       await storage.close();
 
-      // Calculate trust score from connected accounts
-      const accountAge = user.user_metadata?.created_at
-        ? Math.floor((Date.now() - new Date(user.user_metadata.created_at as string).getTime()) / (365.25 * 24 * 60 * 60 * 1000))
-        : 0;
-      const tenureScore = Math.min(accountAge * 5, 30);
+      // Calculate trust score
       const platformScore = connectedProviders.length * 15;
-      const finalScore = Math.min(10 + tenureScore + platformScore, 100);
+      const emailScore = user.email ? 10 : 0;
+      const finalScore = Math.min(10 + platformScore + emailScore, 100);
       setTrustScore(finalScore);
 
       // Determine trust level
@@ -102,33 +94,37 @@ export default function OnboardingPage() {
       else if (finalScore >= 20) trustLevel = 'emerging';
 
       // Save profile to Supabase
-      const { error } = await supabase.from('profiles').upsert({
+      const { error: profileError } = await supabase.from('profiles').upsert({
         id: user.id,
         did: newIdentity.did,
         public_key_hex: newIdentity.publicKeyHex,
-        display_name: displayName,
-        bio: bio || null,
+        display_name: displayName.trim(),
+        bio: bio.trim() || null,
         avatar_url: (user.user_metadata?.avatar_url as string) || null,
         domain: 'professional',
+        seeking: seeking.trim() || null,
+        offering: offering.trim() || null,
         trust_score: finalScore,
         trust_level: trustLevel,
         onboarding_complete: true,
       });
 
-      if (error) {
-        console.error('Profile save error:', error);
+      if (profileError) {
+        console.error('Profile save error:', profileError);
+        setError('Failed to save profile. Please try again.');
+        setStep('profile');
         return;
       }
 
-      // Save credential record for the OAuth provider
+      // Save credential records for connected providers
       for (const provider of connectedProviders) {
         await supabase.from('credentials').upsert({
           user_id: user.id,
           provider,
-          provider_user_id: user.user_metadata?.sub as string || user.id,
+          provider_user_id: (user.user_metadata?.sub as string) || user.id,
           provider_email: user.email || null,
           provider_name: displayName,
-          account_created_at: user.user_metadata?.created_at as string || null,
+          account_created_at: (user.user_metadata?.created_at as string) || null,
           credential_type: 'PlatformVerification',
           credential_json: {
             type: 'PlatformVerification',
@@ -137,7 +133,26 @@ export default function OnboardingPage() {
             issued: new Date().toISOString(),
           },
           verified_at: new Date().toISOString(),
-        }, { onConflict: 'user_id,provider' });
+        }, { onConflict: 'user_id, provider' });
+      }
+
+      // Also save email as a credential if signed up with email
+      if (user.email && !connectedProviders.includes('email')) {
+        await supabase.from('credentials').upsert({
+          user_id: user.id,
+          provider: 'email',
+          provider_user_id: user.id,
+          provider_email: user.email,
+          provider_name: displayName,
+          credential_type: 'EmailVerification',
+          credential_json: {
+            type: 'EmailVerification',
+            issuer: 'did:tacit:service',
+            claim: `Verified email: ${user.email}`,
+            issued: new Date().toISOString(),
+          },
+          verified_at: new Date().toISOString(),
+        }, { onConflict: 'user_id, provider' });
       }
 
       // Brief animation delay
@@ -145,7 +160,8 @@ export default function OnboardingPage() {
       setStep('complete');
     } catch (err) {
       console.error('Minting error:', err);
-      setStep('accounts');
+      setError('Something went wrong during identity minting. Please try again.');
+      setStep('profile');
     }
   }
 
@@ -162,18 +178,18 @@ export default function OnboardingPage() {
       <div className="w-full max-w-lg">
         {/* Progress */}
         <div className="flex items-center justify-center gap-2 mb-10">
-          {(['accounts', 'minting', 'complete'] as Step[]).map((s, i) => (
+          {(['profile', 'minting', 'complete'] as Step[]).map((s, i) => (
             <div key={s} className="flex items-center gap-2">
               <div
                 className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors ${
                   step === s
                     ? 'bg-accent text-white'
-                    : ['accounts', 'minting', 'complete'].indexOf(step) > i
+                    : ['profile', 'minting', 'complete'].indexOf(step) > i
                     ? 'bg-success text-white'
                     : 'bg-bg-card text-text-muted border border-border'
                 }`}
               >
-                {['accounts', 'minting', 'complete'].indexOf(step) > i ? (
+                {['profile', 'minting', 'complete'].indexOf(step) > i ? (
                   <CheckCircle2 className="w-4 h-4" />
                 ) : (
                   i + 1
@@ -184,22 +200,30 @@ export default function OnboardingPage() {
           ))}
         </div>
 
-        {/* Step 1: Connect Accounts */}
-        {step === 'accounts' && (
+        {/* Step 1: Profile Setup */}
+        {step === 'profile' && (
           <div>
             <div className="text-center mb-8">
               <Shield className="w-12 h-12 text-accent mx-auto mb-4" />
-              <h1 className="text-2xl font-bold mb-2">Connect your accounts</h1>
+              <h1 className="text-2xl font-bold mb-2">Set up your identity</h1>
               <p className="text-text-muted">
-                Each account you connect proves part of your real identity and increases your trust score.
+                Tell the network who you are. This will be visible to other verified members.
               </p>
             </div>
 
+            {/* Error */}
+            {error && (
+              <div className="mb-4 p-3 bg-danger/10 border border-danger/30 rounded-xl text-sm text-danger flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                {error}
+              </div>
+            )}
+
             {/* Trust Score Preview */}
-            <div className="bg-bg-card border border-border rounded-xl p-6 mb-6">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm text-text-muted">Trust Score</span>
-                <span className="text-2xl font-bold text-accent">{trustScore}</span>
+            <div className="bg-bg-card border border-border rounded-xl p-4 mb-6">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm text-text-muted">Starting Trust Score</span>
+                <span className="text-xl font-bold text-accent">{trustScore}</span>
               </div>
               <div className="h-2 bg-bg rounded-full overflow-hidden">
                 <div
@@ -208,50 +232,29 @@ export default function OnboardingPage() {
                 />
               </div>
               <p className="text-xs text-text-muted mt-2">
-                Connect more accounts to increase your score. Min 25 to join the network.
+                {connectedProviders.length > 0
+                  ? `Signed in via ${connectedProviders[0]} (+15 points). Connect more accounts later to boost your score.`
+                  : 'Signed in via email (+10 points). Connect Google or GitHub in settings to boost your score.'}
               </p>
             </div>
 
-            {/* Provider buttons */}
-            <div className="space-y-3 mb-6">
-              <button
-                onClick={() => connectProvider('google')}
-                className={`w-full flex items-center gap-3 px-5 py-3.5 rounded-xl font-medium transition-colors ${
-                  connectedProviders.includes('google')
-                    ? 'bg-success/10 border border-success/30 text-success'
-                    : 'bg-white text-gray-900 hover:bg-gray-100'
-                }`}
-                disabled={connectedProviders.includes('google')}
-              >
-                {connectedProviders.includes('google') ? (
-                  <CheckCircle2 className="w-5 h-5" />
-                ) : (
-                  <Mail className="w-5 h-5" />
-                )}
-                {connectedProviders.includes('google') ? 'Google Connected' : 'Connect Google'}
-              </button>
-
-              <button
-                onClick={() => connectProvider('github')}
-                className={`w-full flex items-center gap-3 px-5 py-3.5 rounded-xl font-medium transition-colors ${
-                  connectedProviders.includes('github')
-                    ? 'bg-success/10 border border-success/30 text-success'
-                    : 'bg-bg-card border border-border hover:border-border-bright text-text'
-                }`}
-                disabled={connectedProviders.includes('github')}
-              >
-                {connectedProviders.includes('github') ? (
-                  <CheckCircle2 className="w-5 h-5" />
-                ) : (
-                  <Github className="w-5 h-5" />
-                )}
-                {connectedProviders.includes('github') ? 'GitHub Connected' : 'Connect GitHub'}
-              </button>
+            {/* Connected Account Badge */}
+            <div className="flex items-center gap-2 mb-6">
+              <span className="inline-flex items-center gap-1.5 text-xs bg-success/10 text-success px-2.5 py-1 rounded-full">
+                <CheckCircle2 className="w-3 h-3" />
+                {user.email}
+              </span>
+              {connectedProviders.map((p) => (
+                <span key={p} className="inline-flex items-center gap-1.5 text-xs bg-success/10 text-success px-2.5 py-1 rounded-full">
+                  <CheckCircle2 className="w-3 h-3" />
+                  {p}
+                </span>
+              ))}
             </div>
 
             {/* Display Name */}
-            <div className="mb-6">
-              <label className="block text-sm font-medium mb-2">Display Name</label>
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-2">Display Name *</label>
               <input
                 type="text"
                 value={displayName}
@@ -261,20 +264,43 @@ export default function OnboardingPage() {
               />
             </div>
 
-            <div className="mb-6">
-              <label className="block text-sm font-medium mb-2">Bio (optional)</label>
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-2">Bio</label>
               <textarea
                 value={bio}
                 onChange={(e) => setBio(e.target.value)}
                 rows={2}
                 className="w-full bg-bg-card border border-border rounded-xl px-4 py-3 text-text focus:outline-none focus:border-accent resize-none"
-                placeholder="What are you working on? What are you looking for?"
+                placeholder="What are you working on?"
               />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div>
+                <label className="block text-sm font-medium mb-2">Seeking</label>
+                <input
+                  type="text"
+                  value={seeking}
+                  onChange={(e) => setSeeking(e.target.value)}
+                  className="w-full bg-bg-card border border-border rounded-xl px-4 py-3 text-text focus:outline-none focus:border-accent"
+                  placeholder="Co-founder, funding..."
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">Offering</label>
+                <input
+                  type="text"
+                  value={offering}
+                  onChange={(e) => setOffering(e.target.value)}
+                  className="w-full bg-bg-card border border-border rounded-xl px-4 py-3 text-text focus:outline-none focus:border-accent"
+                  placeholder="Engineering, design..."
+                />
+              </div>
             </div>
 
             <button
               onClick={mintIdentity}
-              disabled={connectedProviders.length === 0 || !displayName.trim()}
+              disabled={!displayName.trim()}
               className="w-full flex items-center justify-center gap-2 bg-accent hover:bg-accent-bright disabled:opacity-50 disabled:cursor-not-allowed text-white px-5 py-3.5 rounded-xl font-medium transition-colors"
             >
               Mint My Identity
@@ -335,7 +361,11 @@ export default function OnboardingPage() {
                 <p className="text-xs text-text-muted mb-1">DID</p>
                 <p className="text-xs font-mono break-all">{identity.did}</p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                <span className="inline-flex items-center gap-1 text-xs bg-success/10 text-success px-2 py-1 rounded-full">
+                  <CheckCircle2 className="w-3 h-3" />
+                  email
+                </span>
                 {connectedProviders.map((p) => (
                   <span
                     key={p}

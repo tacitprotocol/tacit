@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   Shield,
   LayoutDashboard,
@@ -10,15 +10,16 @@ import {
   Users,
   Settings,
   LogOut,
+  Bot,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
-import { useRouter } from 'next/navigation';
 
 const navItems = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/profile', icon: User, label: 'My Identity' },
   { href: '/discover', icon: Compass, label: 'Discover' },
   { href: '/matches', icon: Users, label: 'Matches' },
+  { href: '/agents', icon: Bot, label: 'Agent Hub' },
   { href: '/settings', icon: Settings, label: 'Settings' },
 ];
 
@@ -45,7 +46,9 @@ export function AppSidebar() {
       {/* Nav */}
       <nav className="flex-1 px-3">
         {navItems.map(({ href, icon: Icon, label }) => {
-          const isActive = pathname === href || pathname.startsWith(href + '/');
+          // pathname includes basePath, so we need to compare with /social prefix
+          const fullPath = `/social${href}`;
+          const isActive = pathname === fullPath || pathname.startsWith(fullPath + '/');
           return (
             <Link
               key={href}
