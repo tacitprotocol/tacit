@@ -29,6 +29,21 @@ export function AppSidebar() {
   const supabase = createClient();
 
   async function handleSignOut() {
+    // Clear the user's private key from IndexedDB before signing out.
+    // On shared computers, leaving it behind would let the next user access it.
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const dbName = `tacit-${user.id}`;
+        // Close any open connection first, then delete the entire database
+        const backend = new (await import('@/lib/tacit/indexed-db-backend')).IndexedDBBackend(dbName);
+        await backend.close();
+        indexedDB.deleteDatabase(dbName);
+      }
+    } catch {
+      // Best-effort cleanup — don't block sign-out if this fails
+    }
+
     await supabase.auth.signOut();
     router.push('/login');
   }

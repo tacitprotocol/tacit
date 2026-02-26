@@ -17,10 +17,15 @@ export default function CallbackPage() {
       const refreshToken = hashParams.get('refresh_token');
 
       if (accessToken && refreshToken) {
-        await supabase.auth.setSession({
+        const { error: sessionError } = await supabase.auth.setSession({
           access_token: accessToken,
           refresh_token: refreshToken,
         });
+
+        if (sessionError) {
+          router.replace('/login?error=session_failed');
+          return;
+        }
       }
 
       const { data: { user }, error } = await supabase.auth.getUser();
