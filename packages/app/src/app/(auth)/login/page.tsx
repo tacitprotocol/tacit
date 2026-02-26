@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import { Shield, Github, Mail, Loader2, ArrowRight, KeyRound } from 'lucide-react';
@@ -17,6 +17,15 @@ export default function LoginPage() {
   const [magicLinkSent, setMagicLinkSent] = useState(false);
   const router = useRouter();
   const supabase = createClient();
+
+  // Read error param from URL (e.g., redirected from callback with ?error=session_failed)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const errorParam = params.get('error');
+    if (errorParam === 'session_failed') {
+      setError('Your session expired. Please sign in again.');
+    }
+  }, []);
 
   async function signInWithOAuth(provider: 'google' | 'github') {
     setLoading(provider);
