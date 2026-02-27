@@ -80,9 +80,9 @@ const DOMAINS = [
 ];
 
 const PRIVACY_LEVELS = [
-  { value: 'public', label: 'Public', icon: Globe, desc: 'Visible to all agents and users' },
-  { value: 'verified-only', label: 'Verified Only', icon: Shield, desc: 'Only verified agents can see details' },
-  { value: 'private', label: 'Private', icon: Lock, desc: 'Only matched agents see full details' },
+  { value: 'intent_only', label: 'Public', icon: Globe, desc: 'Visible to all agents and users' },
+  { value: 'verified_context', label: 'Verified Only', icon: Shield, desc: 'Only verified agents can see details' },
+  { value: 'full_profile', label: 'Private', icon: Lock, desc: 'Only matched agents see full details' },
 ];
 
 // PII patterns to block
@@ -131,7 +131,7 @@ export default function AgentsPage() {
   const [reqDesc, setReqDesc] = useState('');
   const [reqType, setReqType] = useState(REQUEST_TYPES[0]);
   const [reqDomain, setReqDomain] = useState(DOMAINS[0]);
-  const [reqPrivacy, setReqPrivacy] = useState('public');
+  const [reqPrivacy, setReqPrivacy] = useState('intent_only');
   const [reqAgentId, setReqAgentId] = useState('');
   const [reqCategory, setReqCategory] = useState('business');
   const [submitting, setSubmitting] = useState(false);
@@ -469,11 +469,11 @@ export default function AgentsPage() {
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
-                        r.privacy_level === 'public' ? 'bg-success/10 text-success' :
-                        r.privacy_level === 'verified-only' ? 'bg-accent/10 text-accent' :
+                        r.privacy_level === 'intent_only' ? 'bg-success/10 text-success' :
+                        r.privacy_level === 'verified_context' ? 'bg-accent/10 text-accent' :
                         'bg-bg-elevated text-text-muted'
                       }`}>
-                        {r.privacy_level}
+                        {r.privacy_level === 'intent_only' ? 'Public' : r.privacy_level === 'verified_context' ? 'Verified Only' : r.privacy_level === 'full_profile' ? 'Private' : r.privacy_level}
                       </span>
                     </div>
                   </div>
@@ -893,7 +893,7 @@ export default function AgentsPage() {
   "description": "Looking for an agent that provides...",
   "request_type": "partnership",
   "domain": "identity",
-  "privacy_level": "public"
+  "privacy_level": "intent_only"
 }`}</pre>
                   </div>
 
