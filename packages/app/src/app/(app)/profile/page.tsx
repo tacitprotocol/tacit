@@ -20,6 +20,7 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Editable fields
   const [displayName, setDisplayName] = useState('');
@@ -53,6 +54,7 @@ export default function ProfilePage() {
   async function saveProfile() {
     if (!profile) return;
     setSaving(true);
+    setSaveError(null);
 
     const { error } = await supabase
       .from('profiles')
@@ -66,7 +68,10 @@ export default function ProfilePage() {
       .eq('id', profile.id);
 
     setSaving(false);
-    if (!error) {
+    if (error) {
+      console.error('Failed to save profile:', error.message);
+      setSaveError('Failed to save changes. Please try again.');
+    } else {
       setSaved(true);
       setProfile({ ...profile, display_name: displayName, bio, seeking, offering });
       setTimeout(() => setSaved(false), 2000);
@@ -124,19 +129,27 @@ export default function ProfilePage() {
             <h3 className="font-semibold mb-4">Edit Profile</h3>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium mb-1.5">Display Name</label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-sm font-medium">Display Name</label>
+                  <span className={`text-[10px] ${displayName.length > 50 ? 'text-danger' : 'text-text-muted'}`}>{displayName.length}/50</span>
+                </div>
                 <input
                   type="text"
                   value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
+                  onChange={(e) => setDisplayName(e.target.value.slice(0, 50))}
+                  maxLength={50}
                   className="w-full bg-bg border border-border rounded-xl px-4 py-2.5 text-text focus:outline-none focus:border-accent"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1.5">Bio</label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-sm font-medium">Bio</label>
+                  <span className={`text-[10px] ${bio.length > 500 ? 'text-danger' : 'text-text-muted'}`}>{bio.length}/500</span>
+                </div>
                 <textarea
                   value={bio}
-                  onChange={(e) => setBio(e.target.value)}
+                  onChange={(e) => setBio(e.target.value.slice(0, 500))}
+                  maxLength={500}
                   rows={3}
                   className="w-full bg-bg border border-border rounded-xl px-4 py-2.5 text-text focus:outline-none focus:border-accent resize-none"
                   placeholder="What are you working on?"
@@ -144,26 +157,39 @@ export default function ProfilePage() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium mb-1.5">Seeking</label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-sm font-medium">Seeking</label>
+                    <span className={`text-[10px] ${seeking.length > 200 ? 'text-danger' : 'text-text-muted'}`}>{seeking.length}/200</span>
+                  </div>
                   <input
                     type="text"
                     value={seeking}
-                    onChange={(e) => setSeeking(e.target.value)}
+                    onChange={(e) => setSeeking(e.target.value.slice(0, 200))}
+                    maxLength={200}
                     className="w-full bg-bg border border-border rounded-xl px-4 py-2.5 text-text focus:outline-none focus:border-accent"
                     placeholder="Co-founder, engineer..."
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium mb-1.5">Offering</label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-sm font-medium">Offering</label>
+                    <span className={`text-[10px] ${offering.length > 200 ? 'text-danger' : 'text-text-muted'}`}>{offering.length}/200</span>
+                  </div>
                   <input
                     type="text"
                     value={offering}
-                    onChange={(e) => setOffering(e.target.value)}
+                    onChange={(e) => setOffering(e.target.value.slice(0, 200))}
+                    maxLength={200}
                     className="w-full bg-bg border border-border rounded-xl px-4 py-2.5 text-text focus:outline-none focus:border-accent"
                     placeholder="Technical expertise..."
                   />
                 </div>
               </div>
+              {saveError && (
+                <div className="p-3 bg-danger/10 border border-danger/30 rounded-xl text-sm text-danger">
+                  {saveError}
+                </div>
+              )}
               <button
                 onClick={saveProfile}
                 disabled={saving}

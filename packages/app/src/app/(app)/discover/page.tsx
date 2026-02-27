@@ -29,21 +29,27 @@ export default function DiscoverPage() {
   const supabase = createClient();
   const [profiles, setProfiles] = useState<PublicProfile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [currentUserId, setCurrentUserId] = useState<string>('');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) setCurrentUserId(user.id);
 
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('onboarding_complete', true)
         .order('trust_score', { ascending: false })
         .limit(50);
 
+      if (error) {
+        console.error('Failed to load profiles:', error.message);
+        setLoadError('Failed to load network members. Please refresh the page.');
+      }
       if (data) setProfiles(data);
       setLoading(false);
     }
@@ -68,6 +74,12 @@ export default function DiscoverPage() {
       <p className="text-text-muted mb-8">
         Browse verified members of the TACIT network. Everyone here has a cryptographic identity.
       </p>
+
+      {loadError && (
+        <div className="mb-6 p-3 bg-danger/10 border border-danger/30 rounded-xl text-sm text-danger">
+          {loadError}
+        </div>
+      )}
 
       {/* Search */}
       <div className="relative mb-6">
@@ -102,7 +114,10 @@ export default function DiscoverPage() {
           {filtered.map((p) => (
             <div
               key={p.id}
-              className="bg-bg-card border border-border rounded-2xl p-5 hover:border-border-bright transition-colors"
+              onClick={() => setExpandedId(expandedId === p.id ? null : p.id)}
+              className={`bg-bg-card border rounded-2xl p-5 transition-colors cursor-pointer ${
+                expandedId === p.id ? 'border-accent/40' : 'border-border hover:border-border-bright'
+              }`}
             >
               {/* Header */}
               <div className="flex items-start justify-between mb-3">
@@ -137,9 +152,9 @@ export default function DiscoverPage() {
                 </span>
               </div>
 
-              {/* Bio */}
+              {/* Bio — show truncated or full */}
               {p.bio && (
-                <p className="text-sm text-text-muted mb-3 line-clamp-2">{p.bio}</p>
+                <p className={`text-sm text-text-muted mb-3 ${expandedId === p.id ? '' : 'line-clamp-2'}`}>{p.bio}</p>
               )}
 
               {/* Seeking / Offering */}
@@ -162,17 +177,31 @@ export default function DiscoverPage() {
                 )}
               </div>
 
-              {/* DID */}
+              {/* DID — full when expanded */}
               <div className="bg-bg rounded-lg px-3 py-1.5 mb-3">
-                <code className="text-[10px] text-text-muted truncate block">
-                  {p.did.slice(0, 24)}...
+                <code className={`text-[10px] text-text-muted block ${expandedId === p.id ? 'break-all' : 'truncate'}`}>
+                  {expandedId === p.id ? p.did : `${p.did.slice(0, 24)}...`}
                 </code>
               </div>
 
+              {/* Domain badge when expanded */}
+              {expandedId === p.id && (
+                <div className="mb-3">
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-bg-elevated text-text-muted">
+                    {p.domain}
+                  </span>
+                </div>
+              )}
+
               {/* Action */}
-              <button className="w-full flex items-center justify-center gap-2 bg-accent/10 hover:bg-accent/20 text-accent text-sm font-medium py-2 rounded-xl transition-colors">
+              <button
+                disabled
+                title="Coming soon"
+                onClick={(e) => e.stopPropagation()}
+                className="w-full flex items-center justify-center gap-2 bg-bg-elevated text-text-muted text-sm font-medium py-2 rounded-xl cursor-not-allowed"
+              >
                 <Send className="w-3.5 h-3.5" />
-                Request Introduction
+                Request Introduction (Coming Soon)
               </button>
             </div>
           ))}

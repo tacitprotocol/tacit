@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Shield, Github, Mail, Loader2, ArrowRight, KeyRound } from 'lucide-react';
 import Link from 'next/link';
 
-type AuthMode = 'options' | 'email-signup' | 'email-login' | 'magic-link';
+type AuthMode = 'options' | 'email-signup' | 'email-login' | 'magic-link' | 'forgot-password';
 
 export default function LoginPage() {
   const [loading, setLoading] = useState<string | null>(null);
@@ -15,6 +15,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [magicLinkSent, setMagicLinkSent] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
   const router = useRouter();
   const supabase = createClient();
 
@@ -33,7 +34,7 @@ export default function LoginPage() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
-        redirectTo: `${window.location.origin}/social/callback`,
+        redirectTo: `${window.location.origin}/callback`,
         queryParams: provider === 'google' ? { access_type: 'offline', prompt: 'consent' } : {},
       },
     });
@@ -54,7 +55,7 @@ export default function LoginPage() {
       email,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/social/callback`,
+        emailRedirectTo: `${window.location.origin}/callback`,
       },
     });
     if (error) {
@@ -96,7 +97,7 @@ export default function LoginPage() {
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: `${window.location.origin}/social/callback`,
+        emailRedirectTo: `${window.location.origin}/callback`,
       },
     });
     if (error) {
@@ -104,6 +105,22 @@ export default function LoginPage() {
       setLoading(null);
     } else {
       setMagicLinkSent(true);
+      setLoading(null);
+    }
+  }
+
+  async function sendPasswordReset() {
+    if (!email) return;
+    setLoading('reset');
+    setError(null);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/callback`,
+    });
+    if (error) {
+      setError(error.message);
+      setLoading(null);
+    } else {
+      setResetSent(true);
       setLoading(null);
     }
   }
@@ -121,6 +138,7 @@ export default function LoginPage() {
             {authMode === 'email-signup' ? 'Create your account' :
              authMode === 'email-login' ? 'Welcome back' :
              authMode === 'magic-link' ? 'Passwordless login' :
+             authMode === 'forgot-password' ? 'Reset your password' :
              'Join the verified network'}
           </h1>
           <p className="text-text-muted">
@@ -229,20 +247,29 @@ export default function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full bg-bg-card border border-border rounded-xl px-4 py-3 text-text focus:outline-none focus:border-accent"
-                placeholder="Min 6 characters"
+                placeholder="Min 8 characters"
                 onKeyDown={(e) => e.key === 'Enter' && signUpWithEmail()}
               />
+              {password.length > 0 && password.length < 8 && (
+                <p className="text-xs text-warning mt-1">Password must be at least 8 characters</p>
+              )}
+              {password.length >= 8 && (
+                <p className="text-xs text-success mt-1">
+                  {password.length >= 12 && /[A-Z]/.test(password) && /\d/.test(password) ? 'Strong' :
+                   password.length >= 10 ? 'Good' : 'Fair'}
+                </p>
+              )}
             </div>
             <button
               onClick={signUpWithEmail}
-              disabled={!email || !password || password.length < 6 || loading !== null}
+              disabled={!email || !password || password.length < 8 || loading !== null}
               className="w-full flex items-center justify-center gap-2 bg-accent hover:bg-accent-bright disabled:opacity-50 disabled:cursor-not-allowed text-white px-5 py-3.5 rounded-xl font-medium transition-colors"
             >
               {loading === 'email-signup' ? <Loader2 className="w-5 h-5 animate-spin" /> : <Mail className="w-5 h-5" />}
               Create Account
             </button>
             <button
-              onClick={() => { setAuthMode('options'); setError(null); }}
+              onClick={() => { setAuthMode('options'); setError(null); setMagicLinkSent(false); }}
               className="w-full text-sm text-text-muted hover:text-text transition-colors py-2"
             >
               Back to options
@@ -284,13 +311,13 @@ export default function LoginPage() {
               Sign In
             </button>
             <button
-              onClick={() => { setAuthMode('magic-link'); setError(null); }}
+              onClick={() => { setAuthMode('forgot-password'); setError(null); setResetSent(false); }}
               className="w-full text-sm text-text-muted hover:text-text transition-colors py-1"
             >
-              Forgot password? Use a magic link
+              Forgot password?
             </button>
             <button
-              onClick={() => { setAuthMode('options'); setError(null); }}
+              onClick={() => { setAuthMode('options'); setError(null); setMagicLinkSent(false); }}
               className="w-full text-sm text-text-muted hover:text-text transition-colors py-1"
             >
               Back to options
@@ -322,10 +349,58 @@ export default function LoginPage() {
               Send Magic Link
             </button>
             <button
-              onClick={() => { setAuthMode('options'); setError(null); }}
+              onClick={() => { setAuthMode('options'); setError(null); setMagicLinkSent(false); }}
               className="w-full text-sm text-text-muted hover:text-text transition-colors py-2"
             >
               Back to options
+            </button>
+          </div>
+        )}
+
+        {/* Forgot Password Form */}
+        {authMode === 'forgot-password' && !resetSent && (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1.5">Email</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-bg-card border border-border rounded-xl px-4 py-3 text-text focus:outline-none focus:border-accent"
+                placeholder="you@example.com"
+                autoFocus
+                onKeyDown={(e) => e.key === 'Enter' && sendPasswordReset()}
+              />
+            </div>
+            <button
+              onClick={sendPasswordReset}
+              disabled={!email || loading !== null}
+              className="w-full flex items-center justify-center gap-2 bg-accent hover:bg-accent-bright disabled:opacity-50 disabled:cursor-not-allowed text-white px-5 py-3.5 rounded-xl font-medium transition-colors"
+            >
+              {loading === 'reset' ? <Loader2 className="w-5 h-5 animate-spin" /> : <KeyRound className="w-5 h-5" />}
+              Send Reset Link
+            </button>
+            <button
+              onClick={() => { setAuthMode('email-login'); setError(null); }}
+              className="w-full text-sm text-text-muted hover:text-text transition-colors py-2"
+            >
+              Back to sign in
+            </button>
+          </div>
+        )}
+
+        {/* Reset Sent */}
+        {authMode === 'forgot-password' && resetSent && (
+          <div className="text-center">
+            <div className="p-4 bg-success/10 border border-success/30 rounded-xl mb-4">
+              <p className="text-sm text-success font-medium mb-1">Password reset link sent!</p>
+              <p className="text-xs text-text-muted">Check your email and follow the link to reset your password.</p>
+            </div>
+            <button
+              onClick={() => { setAuthMode('email-login'); setError(null); setResetSent(false); }}
+              className="text-sm text-text-muted hover:text-text transition-colors"
+            >
+              Back to sign in
             </button>
           </div>
         )}

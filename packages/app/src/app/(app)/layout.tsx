@@ -17,25 +17,43 @@ export default function AppLayout({
   const supabase = createClient();
 
   useEffect(() => {
+    let cancelled = false;
+
     async function checkAuth() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        router.replace('/login');
-        return;
+      try {
+        const { data: { user }, error } = await supabase.auth.getUser();
+        if (cancelled) return;
+
+        if (error || !user) {
+          router.replace('/login');
+          return;
+        }
+
+        setAuthenticated(true);
+      } catch {
+        if (!cancelled) {
+          router.replace('/login');
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
-      setAuthenticated(true);
-      setLoading(false);
     }
     checkAuth();
 
-    // Listen for auth state changes (logout, token refresh)
+    // Listen for auth state changes (logout, token expiry, refresh)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'SIGNED_OUT') {
+        setAuthenticated(false);
         router.replace('/login');
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, [router, supabase]);
 
   if (loading) {
@@ -54,7 +72,7 @@ export default function AppLayout({
   return (
     <div className="flex min-h-screen">
       <AppSidebar />
-      <main className="flex-1 ml-64 p-8">
+      <main className="flex-1 md:ml-64 p-4 pt-16 md:pt-8 md:p-8">
         {children}
       </main>
     </div>

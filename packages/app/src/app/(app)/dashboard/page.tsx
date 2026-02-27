@@ -21,24 +21,35 @@ export default function DashboardPage() {
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [stats, setStats] = useState({ members: 0, matches: 0, intents: 0 });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const [profileRes, credsRes, membersRes] = await Promise.all([
+      const [profileRes, credsRes, membersRes, intentsRes, matchesRes] = await Promise.all([
         supabase.from('profiles').select('*').eq('id', user.id).single(),
         supabase.from('credentials').select('*').eq('user_id', user.id),
         supabase.from('profiles').select('id', { count: 'exact', head: true }),
+        supabase.from('engagement_requests').select('id', { count: 'exact', head: true }).eq('user_id', user.id),
+        supabase.from('engagement_requests').select('id', { count: 'exact', head: true }).eq('target_id', user.id).eq('status', 'pending'),
       ]);
+
+      if (profileRes.error) {
+        console.error('Failed to load profile:', profileRes.error.message);
+        setLoadError('Failed to load your profile. Please refresh the page.');
+      }
+      if (credsRes.error) {
+        console.error('Failed to load credentials:', credsRes.error.message);
+      }
 
       if (profileRes.data) setProfile(profileRes.data);
       if (credsRes.data) setCredentials(credsRes.data);
       setStats({
         members: membersRes.count || 0,
-        matches: 0,
-        intents: 0,
+        matches: matchesRes.count || 0,
+        intents: intentsRes.count || 0,
       });
       setLoading(false);
     }
@@ -68,6 +79,12 @@ export default function DashboardPage() {
     <div>
       <h1 className="text-2xl font-bold mb-1">Dashboard</h1>
       <p className="text-text-muted mb-8">Welcome back, {profile.display_name}</p>
+
+      {loadError && (
+        <div className="mb-6 p-3 bg-danger/10 border border-danger/30 rounded-xl text-sm text-danger">
+          {loadError}
+        </div>
+      )}
 
       {/* Stats Row */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">

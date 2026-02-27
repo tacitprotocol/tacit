@@ -44,6 +44,18 @@ export default function OnboardingPage() {
         router.replace('/login');
         return;
       }
+      // Check if user already completed onboarding — prevent re-minting
+      const { data: existingProfile } = await supabase
+        .from('profiles')
+        .select('onboarding_complete')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (existingProfile?.onboarding_complete) {
+        router.replace('/dashboard');
+        return;
+      }
+
       setUser(user);
 
       // Extract connected providers from user metadata
@@ -58,9 +70,13 @@ export default function OnboardingPage() {
       const name = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Tacit User';
       setDisplayName(name as string);
 
-      // Calculate initial trust score
-      const baseScore = 10 + (providers.length * 15);
-      setTrustScore(Math.min(baseScore, 100));
+      // Client-side trust score preview only — the authoritative score is
+      // calculated in mintIdentity() and written to the DB via Supabase RLS.
+      // SECURITY: Add a DB trigger or RLS policy to recalculate trust_score
+      // on insert/update so clients cannot spoof scores via dev tools.
+      const platformScore = providers.length * 15;
+      const emailScore = user.email ? 10 : 0;
+      setTrustScore(Math.min(10 + platformScore + emailScore, 100));
     }
     init();
   }, [router, supabase]);
@@ -118,7 +134,7 @@ export default function OnboardingPage() {
 
       // Save credential records for connected providers
       for (const provider of connectedProviders) {
-        await supabase.from('credentials').upsert({
+        const { error: credError } = await supabase.from('credentials').upsert({
           user_id: user.id,
           provider,
           provider_user_id: (user.user_metadata?.sub as string) || user.id,
@@ -134,11 +150,14 @@ export default function OnboardingPage() {
           },
           verified_at: new Date().toISOString(),
         }, { onConflict: 'user_id, provider' });
+        if (credError) {
+          console.error(`Failed to save ${provider} credential:`, credError.message);
+        }
       }
 
       // Also save email as a credential if signed up with email
       if (user.email && !connectedProviders.includes('email')) {
-        await supabase.from('credentials').upsert({
+        const { error: emailCredError } = await supabase.from('credentials').upsert({
           user_id: user.id,
           provider: 'email',
           provider_user_id: user.id,
@@ -153,6 +172,9 @@ export default function OnboardingPage() {
           },
           verified_at: new Date().toISOString(),
         }, { onConflict: 'user_id, provider' });
+        if (emailCredError) {
+          console.error('Failed to save email credential:', emailCredError.message);
+        }
       }
 
       // Brief animation delay

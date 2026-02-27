@@ -86,15 +86,25 @@ const PRIVACY_LEVELS = [
 ];
 
 // PII patterns to block
-const PII_PATTERNS = [
-  /\b[\w.-]+@[\w.-]+\.\w{2,}\b/i, // email
-  /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/, // phone
-  /\b\d{3}[-]?\d{2}[-]?\d{4}\b/, // SSN
-  /\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/, // credit card
+const PII_PATTERNS: { pattern: RegExp; label: string }[] = [
+  { pattern: /\b[\w.-]+@[\w.-]+\.\w{2,}\b/i, label: 'email address' },
+  { pattern: /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/, label: 'phone number' },
+  { pattern: /\b\+\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}\b/, label: 'international phone number' },
+  { pattern: /\b\d{3}[-]?\d{2}[-]?\d{4}\b/, label: 'SSN' },
+  { pattern: /\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b/, label: 'credit card number' },
+  { pattern: /\b3[47]\d{2}[\s-]?\d{6}[\s-]?\d{5}\b/, label: 'Amex card number' },
+  { pattern: /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/, label: 'IP address' },
 ];
 
 function containsPII(text: string): boolean {
-  return PII_PATTERNS.some((pattern) => pattern.test(text));
+  return PII_PATTERNS.some(({ pattern }) => pattern.test(text));
+}
+
+function detectPIIType(text: string): string | null {
+  for (const { pattern, label } of PII_PATTERNS) {
+    if (pattern.test(text)) return label;
+  }
+  return null;
 }
 
 export default function AgentsPage() {
@@ -126,6 +136,7 @@ export default function AgentsPage() {
   const [reqCategory, setReqCategory] = useState('business');
   const [submitting, setSubmitting] = useState(false);
   const [piiWarning, setPiiWarning] = useState(false);
+  const [piiDetectedType, setPiiDetectedType] = useState<string>('');
   const [filterCategory, setFilterCategory] = useState<string | null>(null);
 
   useEffect(() => {
@@ -137,21 +148,29 @@ export default function AgentsPage() {
     if (user) {
       setUserId(user.id);
       // Load user's agents
-      const { data: agents } = await supabase
+      const { data: agents, error: agentsError } = await supabase
         .from('agent_profiles')
         .select('*')
         .eq('operator_user_id', user.id);
+      if (agentsError) {
+        console.error('Failed to load agents:', agentsError.message);
+        setError('Failed to load your agents. Please refresh the page.');
+      }
       if (agents) setMyAgents(agents);
     }
 
     // Load active requests with agent info
-    const { data } = await supabase
+    const { data, error: reqError } = await supabase
       .from('agent_requests')
       .select('*, agent_profiles(id, agent_name, agent_description, trust_score, is_verified)')
       .eq('status', 'active')
       .order('created_at', { ascending: false })
       .limit(50);
 
+    if (reqError) {
+      console.error('Failed to load requests:', reqError.message);
+      setError('Failed to load engagement requests. Please refresh the page.');
+    }
     if (data) setRequests(data as AgentRequest[]);
     setLoading(false);
   }
@@ -255,10 +274,30 @@ export default function AgentsPage() {
     load(); // Reload
   }
 
+  async function deleteAgent(agentId: string, agentName: string) {
+    if (!confirm(`Delete agent "${agentName}"? This will also remove its API key and all requests. This cannot be undone.`)) {
+      return;
+    }
+    setError(null);
+
+    // Delete agent's requests first, then the agent
+    await supabase.from('agent_requests').delete().eq('agent_id', agentId);
+    const { error: delError } = await supabase.from('agent_profiles').delete().eq('id', agentId);
+
+    if (delError) {
+      setError(`Failed to delete agent: ${delError.message}`);
+    } else {
+      setMyAgents((prev) => prev.filter((a) => a.id !== agentId));
+      setSuccess(`Agent "${agentName}" deleted.`);
+    }
+  }
+
   // Check for PII as user types
   function handleDescChange(value: string, setter: (v: string) => void) {
     setter(value);
-    setPiiWarning(containsPII(value));
+    const detected = detectPIIType(value);
+    setPiiWarning(detected !== null);
+    if (detected) setPiiDetectedType(detected);
   }
 
   const filtered = requests.filter((r) => {
@@ -275,9 +314,12 @@ export default function AgentsPage() {
 
   function copyKey() {
     if (generatedKey) {
-      navigator.clipboard.writeText(generatedKey);
-      setKeyCopied(true);
-      setTimeout(() => setKeyCopied(false), 2000);
+      navigator.clipboard.writeText(generatedKey).then(() => {
+        setKeyCopied(true);
+        setTimeout(() => setKeyCopied(false), 2000);
+      }).catch(() => {
+        // Clipboard permission denied
+      });
     }
   }
 
@@ -421,7 +463,7 @@ export default function AgentsPage() {
                       <div>
                         <h3 className="font-semibold text-sm">{r.title}</h3>
                         <span className="text-xs text-text-muted">
-                          by {(r.agent_profiles as unknown as AgentProfile)?.agent_name || 'Unknown Agent'}
+                          by {r.agent_profiles?.agent_name || 'Unknown Agent'}
                         </span>
                       </div>
                     </div>
@@ -456,11 +498,11 @@ export default function AgentsPage() {
                   </div>
 
                   {/* Agent trust */}
-                  {(r.agent_profiles as unknown as AgentProfile) && (
+                  {r.agent_profiles && (
                     <div className="flex items-center gap-2 text-xs text-text-muted">
                       <Shield className="w-3 h-3" />
-                      Trust: {(r.agent_profiles as unknown as AgentProfile).trust_score}
-                      {(r.agent_profiles as unknown as AgentProfile).is_verified && (
+                      Trust: {r.agent_profiles.trust_score}
+                      {r.agent_profiles.is_verified && (
                         <span className="text-success flex items-center gap-0.5">
                           <CheckCircle2 className="w-3 h-3" /> Verified
                         </span>
@@ -544,7 +586,7 @@ export default function AgentsPage() {
                   {piiWarning && (
                     <p className="text-xs text-danger mt-1 flex items-center gap-1">
                       <AlertTriangle className="w-3 h-3" />
-                      Personal information detected. Remove emails, phone numbers, etc.
+                      Detected: {piiDetectedType}. Remove all personal information before submitting.
                     </p>
                   )}
                 </div>
@@ -643,7 +685,7 @@ export default function AgentsPage() {
                 {piiWarning && (
                   <p className="text-xs text-danger mt-1 flex items-center gap-1">
                     <AlertTriangle className="w-3 h-3" />
-                    Personal information detected. Remove all PII before posting.
+                    Detected: {piiDetectedType}. Remove all personal information before posting.
                   </p>
                 )}
               </div>
@@ -656,7 +698,7 @@ export default function AgentsPage() {
                     <button
                       key={c.value}
                       type="button"
-                      onClick={() => { setReqCategory(c.value); setReqDomain(c.value); }}
+                      onClick={() => setReqCategory(c.value)}
                       className={`flex items-center gap-2 p-2.5 rounded-xl border text-left text-sm transition-colors ${
                         reqCategory === c.value
                           ? 'border-accent bg-accent/5 text-accent'
@@ -764,6 +806,12 @@ export default function AgentsPage() {
                         </div>
                       </div>
                     </div>
+                    <button
+                      onClick={() => deleteAgent(a.id, a.agent_name)}
+                      className="text-xs text-text-muted hover:text-danger transition-colors px-2 py-1 rounded-lg hover:bg-danger/5"
+                    >
+                      Delete
+                    </button>
                   </div>
                   {a.agent_description && (
                     <p className="text-sm text-text-muted mb-2">{a.agent_description}</p>
@@ -807,7 +855,7 @@ export default function AgentsPage() {
               <div>
                 <h3 className="text-sm font-semibold mb-2">Base URL</h3>
                 <code className="block bg-bg rounded-lg px-4 py-2 text-xs font-mono text-text-muted">
-                  https://ntuqqrcwfjepkdrxlnwq.supabase.co/functions/v1/agent-api
+                  {process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://your-project.supabase.co'}/functions/v1/agent-api
                 </code>
               </div>
 
