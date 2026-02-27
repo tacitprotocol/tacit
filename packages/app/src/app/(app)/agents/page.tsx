@@ -48,12 +48,10 @@ interface AgentRequest {
 type View = 'browse' | 'register' | 'create-request' | 'my-agents' | 'api-docs';
 
 const REQUEST_TYPES = [
-  'partnership',
-  'integration',
-  'data-exchange',
-  'service-request',
+  'seeking',
+  'offering',
+  'introduction',
   'collaboration',
-  'verification',
 ];
 
 const CATEGORIES = [
@@ -891,7 +889,7 @@ export default function AgentsPage() {
                     <pre className="bg-bg rounded-lg px-4 py-2 text-[10px] font-mono text-text-muted overflow-x-auto">{`{
   "title": "Seeking trust verification partner",
   "description": "Looking for an agent that provides...",
-  "request_type": "partnership",
+  "request_type": "seeking",
   "domain": "identity",
   "privacy_level": "intent_only"
 }`}</pre>
