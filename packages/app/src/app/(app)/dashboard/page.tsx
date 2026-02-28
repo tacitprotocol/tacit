@@ -135,7 +135,7 @@ export default function DashboardPage() {
             <h3 className="font-semibold mb-4">Get Started</h3>
             <div className="space-y-3">
               <Link
-                href="/discover"
+                href="/agents"
                 className="flex items-center justify-between p-3 rounded-xl border border-border hover:border-accent/30 hover:bg-accent/5 transition-colors group"
               >
                 <div className="flex items-center gap-3">

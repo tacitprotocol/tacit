@@ -67,10 +67,11 @@ export default function MatchesPage() {
 
     if (inRes.error) {
       console.error('Failed to load incoming:', inRes.error.message);
-      // Table may not exist yet — show empty state
+      setError('Failed to load incoming requests. Please refresh the page.');
     }
     if (outRes.error) {
       console.error('Failed to load outgoing:', outRes.error.message);
+      if (!inRes.error) setError('Failed to load outgoing requests. Please refresh the page.');
     }
 
     setIncoming((inRes.data as MatchRequest[]) || []);

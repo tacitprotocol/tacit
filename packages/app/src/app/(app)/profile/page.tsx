@@ -82,7 +82,7 @@ export default function ProfilePage() {
     await supabase.auth.signInWithOAuth({
       provider,
       options: {
-        redirectTo: `${window.location.origin}/profile`,
+        redirectTo: `${window.location.origin}/callback`,
       },
     });
   }

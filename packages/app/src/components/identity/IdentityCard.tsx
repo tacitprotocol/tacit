@@ -26,9 +26,12 @@ export function IdentityCard({
   const [copied, setCopied] = useState(false);
 
   function copyDid() {
-    navigator.clipboard.writeText(did);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    navigator.clipboard.writeText(did).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {
+      setCopied(false);
+    });
   }
 
   const shortDid = did.length > 30 ? `${did.slice(0, 20)}...${did.slice(-8)}` : did;
@@ -93,7 +96,7 @@ export function IdentityCard({
             Share Identity (QR)
           </summary>
           <div className="mt-3 flex justify-center p-4 bg-white rounded-xl">
-            <QRCodeSVG value={did} size={160} level="M" />
+            <QRCodeSVG value={`https://tacitprotocol.com/verify?did=${encodeURIComponent(did)}`} size={160} level="M" />
           </div>
         </details>
       </div>

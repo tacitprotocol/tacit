@@ -276,21 +276,29 @@ export default function OnboardingPage() {
 
             {/* Display Name */}
             <div className="mb-4">
-              <label className="block text-sm font-medium mb-2">Display Name *</label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium">Display Name *</label>
+                <span className={`text-[10px] ${displayName.length > 50 ? 'text-danger' : 'text-text-muted'}`}>{displayName.length}/50</span>
+              </div>
               <input
                 type="text"
                 value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
+                onChange={(e) => setDisplayName(e.target.value.slice(0, 50))}
+                maxLength={50}
                 className="w-full bg-bg-card border border-border rounded-xl px-4 py-3 text-text focus:outline-none focus:border-accent"
                 placeholder="How others will see you"
               />
             </div>
 
             <div className="mb-4">
-              <label className="block text-sm font-medium mb-2">Bio</label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-sm font-medium">Bio</label>
+                <span className={`text-[10px] ${bio.length > 500 ? 'text-danger' : 'text-text-muted'}`}>{bio.length}/500</span>
+              </div>
               <textarea
                 value={bio}
-                onChange={(e) => setBio(e.target.value)}
+                onChange={(e) => setBio(e.target.value.slice(0, 500))}
+                maxLength={500}
                 rows={2}
                 className="w-full bg-bg-card border border-border rounded-xl px-4 py-3 text-text focus:outline-none focus:border-accent resize-none"
                 placeholder="What are you working on?"
@@ -299,21 +307,29 @@ export default function OnboardingPage() {
 
             <div className="grid grid-cols-2 gap-4 mb-6">
               <div>
-                <label className="block text-sm font-medium mb-2">Seeking</label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium">Seeking</label>
+                  <span className={`text-[10px] ${seeking.length > 200 ? 'text-danger' : 'text-text-muted'}`}>{seeking.length}/200</span>
+                </div>
                 <input
                   type="text"
                   value={seeking}
-                  onChange={(e) => setSeeking(e.target.value)}
+                  onChange={(e) => setSeeking(e.target.value.slice(0, 200))}
+                  maxLength={200}
                   className="w-full bg-bg-card border border-border rounded-xl px-4 py-3 text-text focus:outline-none focus:border-accent"
                   placeholder="Co-founder, funding..."
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-2">Offering</label>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="text-sm font-medium">Offering</label>
+                  <span className={`text-[10px] ${offering.length > 200 ? 'text-danger' : 'text-text-muted'}`}>{offering.length}/200</span>
+                </div>
                 <input
                   type="text"
                   value={offering}
-                  onChange={(e) => setOffering(e.target.value)}
+                  onChange={(e) => setOffering(e.target.value.slice(0, 200))}
+                  maxLength={200}
                   className="w-full bg-bg-card border border-border rounded-xl px-4 py-3 text-text focus:outline-none focus:border-accent"
                   placeholder="Engineering, design..."
                 />

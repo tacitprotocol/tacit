@@ -33,28 +33,62 @@ export default function DiscoverPage() {
   const [search, setSearch] = useState('');
   const [currentUserId, setCurrentUserId] = useState<string>('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [requestingId, setRequestingId] = useState<string | null>(null);
+  const [requestedIds, setRequestedIds] = useState<Set<string>>(new Set());
+  const [requestError, setRequestError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) setCurrentUserId(user.id);
 
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('onboarding_complete', true)
-        .order('trust_score', { ascending: false })
-        .limit(50);
+      const [profilesRes, existingReqs] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('id, did, display_name, bio, avatar_url, trust_score, trust_level, seeking, offering, domain')
+          .eq('onboarding_complete', true)
+          .order('trust_score', { ascending: false })
+          .limit(50),
+        user ? supabase
+          .from('engagement_requests')
+          .select('target_id')
+          .eq('user_id', user.id) : Promise.resolve({ data: [], error: null }),
+      ]);
 
-      if (error) {
-        console.error('Failed to load profiles:', error.message);
+      if (profilesRes.error) {
+        console.error('Failed to load profiles:', profilesRes.error.message);
         setLoadError('Failed to load network members. Please refresh the page.');
       }
-      if (data) setProfiles(data);
+      if (profilesRes.data) setProfiles(profilesRes.data);
+      if (existingReqs.data) {
+        setRequestedIds(new Set(existingReqs.data.map((r: { target_id: string }) => r.target_id)));
+      }
       setLoading(false);
     }
     load();
   }, [supabase]);
+
+  async function requestIntroduction(targetId: string) {
+    setRequestingId(targetId);
+    setRequestError(null);
+
+    const { error } = await supabase
+      .from('engagement_requests')
+      .insert({
+        user_id: currentUserId,
+        target_id: targetId,
+        request_type: 'introduction',
+        status: 'pending',
+      });
+
+    if (error) {
+      console.error('Failed to send request:', error.message);
+      setRequestError('Failed to send introduction request.');
+    } else {
+      setRequestedIds((prev) => new Set(prev).add(targetId));
+    }
+    setRequestingId(null);
+  }
 
   const filtered = profiles.filter((p) => {
     if (p.id === currentUserId) return false;
@@ -75,9 +109,9 @@ export default function DiscoverPage() {
         Browse verified members of the TACIT network. Everyone here has a cryptographic identity.
       </p>
 
-      {loadError && (
+      {(loadError || requestError) && (
         <div className="mb-6 p-3 bg-danger/10 border border-danger/30 rounded-xl text-sm text-danger">
-          {loadError}
+          {loadError || requestError}
         </div>
       )}
 
@@ -195,13 +229,25 @@ export default function DiscoverPage() {
 
               {/* Action */}
               <button
-                disabled
-                title="Coming soon"
-                onClick={(e) => e.stopPropagation()}
-                className="w-full flex items-center justify-center gap-2 bg-bg-elevated text-text-muted text-sm font-medium py-2 rounded-xl cursor-not-allowed"
+                disabled={!currentUserId || requestedIds.has(p.id) || requestingId === p.id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  requestIntroduction(p.id);
+                }}
+                className={`w-full flex items-center justify-center gap-2 text-sm font-medium py-2 rounded-xl transition-colors ${
+                  requestedIds.has(p.id)
+                    ? 'bg-success/10 text-success cursor-default'
+                    : 'bg-accent hover:bg-accent-bright text-white disabled:opacity-50'
+                }`}
               >
-                <Send className="w-3.5 h-3.5" />
-                Request Introduction (Coming Soon)
+                {requestingId === p.id ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : requestedIds.has(p.id) ? (
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                ) : (
+                  <Send className="w-3.5 h-3.5" />
+                )}
+                {requestedIds.has(p.id) ? 'Request Sent' : 'Request Introduction'}
               </button>
             </div>
           ))}

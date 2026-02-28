@@ -18,6 +18,9 @@ import {
   Clock,
   AlertTriangle,
   X,
+  Pencil,
+  RefreshCw,
+  Save,
 } from 'lucide-react';
 
 interface AgentProfile {
@@ -136,6 +139,15 @@ export default function AgentsPage() {
   const [piiWarning, setPiiWarning] = useState(false);
   const [piiDetectedType, setPiiDetectedType] = useState<string>('');
   const [filterCategory, setFilterCategory] = useState<string | null>(null);
+
+  // Edit agent state
+  const [editingAgent, setEditingAgent] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editDesc, setEditDesc] = useState('');
+
+  // Revoke/regenerate API key state
+  const [newApiKey, setNewApiKey] = useState<string | null>(null);
+  const [newKeyCopied, setNewKeyCopied] = useState(false);
 
   useEffect(() => {
     load();
@@ -290,6 +302,68 @@ export default function AgentsPage() {
     }
   }
 
+  async function saveAgent(agentId: string) {
+    if (!editName.trim()) {
+      setError('Agent name is required');
+      return;
+    }
+    if (containsPII(editDesc)) {
+      setError('Description contains personal information. Remove PII before saving.');
+      return;
+    }
+    setError(null);
+
+    const { error: updateError } = await supabase
+      .from('agent_profiles')
+      .update({
+        agent_name: editName.trim(),
+        agent_description: editDesc.trim() || null,
+      })
+      .eq('id', agentId);
+
+    if (updateError) {
+      setError(`Failed to update agent: ${updateError.message}`);
+    } else {
+      setMyAgents((prev) =>
+        prev.map((a) =>
+          a.id === agentId
+            ? { ...a, agent_name: editName.trim(), agent_description: editDesc.trim() || null }
+            : a
+        )
+      );
+      setEditingAgent(null);
+      setSuccess('Agent updated.');
+    }
+  }
+
+  async function revokeApiKey(agentId: string, agentName: string) {
+    if (!confirm(`Regenerate API key for "${agentName}"? The old key will stop working immediately.`)) {
+      return;
+    }
+    setError(null);
+    setNewApiKey(null);
+
+    const rawKey = `tacit_agent_${crypto.randomUUID().replace(/-/g, '')}`;
+    const encoder = new TextEncoder();
+    const data = encoder.encode(rawKey);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+    const { error: updateError } = await supabase
+      .from('agent_profiles')
+      .update({ api_key_hash: hashHex })
+      .eq('id', agentId);
+
+    if (updateError) {
+      setError(`Failed to regenerate key: ${updateError.message}`);
+    } else {
+      setNewApiKey(rawKey);
+      setNewKeyCopied(false);
+      setSuccess(`New API key generated for "${agentName}". Save it now — it won't be shown again.`);
+    }
+  }
+
   // Check for PII as user types
   function handleDescChange(value: string, setter: (v: string) => void) {
     setter(value);
@@ -399,7 +473,7 @@ export default function AgentsPage() {
             />
           </div>
 
-          {/* Category Filter */}
+          {/* Domain Filter */}
           <div className="flex flex-wrap gap-2 mb-6">
             <button
               onClick={() => setFilterCategory(null)}
@@ -409,15 +483,15 @@ export default function AgentsPage() {
             >
               All
             </button>
-            {CATEGORIES.map((c) => (
+            {DOMAINS.map((d) => (
               <button
-                key={c.value}
-                onClick={() => setFilterCategory(filterCategory === c.value ? null : c.value)}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                  filterCategory === c.value ? 'bg-accent text-white' : 'bg-bg-card border border-border text-text-muted hover:text-text'
+                key={d}
+                onClick={() => setFilterCategory(filterCategory === d ? null : d)}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors capitalize ${
+                  filterCategory === d ? 'bg-accent text-white' : 'bg-bg-card border border-border text-text-muted hover:text-text'
                 }`}
               >
-                {c.emoji} {c.label}
+                {d}
               </button>
             ))}
           </div>
@@ -792,8 +866,18 @@ export default function AgentsPage() {
                         <Bot className="w-5 h-5 text-accent" />
                       </div>
                       <div>
-                        <h3 className="font-semibold">{a.agent_name}</h3>
-                        <div className="flex items-center gap-2 text-xs text-text-muted">
+                        {editingAgent === a.id ? (
+                          <input
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                            maxLength={50}
+                            className="bg-bg-elevated border border-border rounded-lg px-2 py-1 text-sm font-semibold w-full"
+                            placeholder="Agent name"
+                          />
+                        ) : (
+                          <h3 className="font-semibold">{a.agent_name}</h3>
+                        )}
+                        <div className="flex items-center gap-2 text-xs text-text-muted mt-0.5">
                           <Shield className="w-3 h-3" />
                           Trust: {a.trust_score}
                           {a.is_verified && (
@@ -804,15 +888,62 @@ export default function AgentsPage() {
                         </div>
                       </div>
                     </div>
-                    <button
-                      onClick={() => deleteAgent(a.id, a.agent_name)}
-                      className="text-xs text-text-muted hover:text-danger transition-colors px-2 py-1 rounded-lg hover:bg-danger/5"
-                    >
-                      Delete
-                    </button>
+                    <div className="flex items-center gap-1">
+                      {editingAgent === a.id ? (
+                        <>
+                          <button
+                            onClick={() => saveAgent(a.id)}
+                            className="text-xs text-success hover:text-success/80 transition-colors px-2 py-1 rounded-lg hover:bg-success/5"
+                          >
+                            <Save className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setEditingAgent(null)}
+                            className="text-xs text-text-muted hover:text-text transition-colors px-2 py-1 rounded-lg hover:bg-bg-elevated"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => { setEditingAgent(a.id); setEditName(a.agent_name); setEditDesc(a.agent_description || ''); }}
+                            className="text-xs text-text-muted hover:text-accent transition-colors px-2 py-1 rounded-lg hover:bg-accent/5"
+                            title="Edit agent"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => revokeApiKey(a.id, a.agent_name)}
+                            className="text-xs text-text-muted hover:text-warning transition-colors px-2 py-1 rounded-lg hover:bg-warning/5"
+                            title="Regenerate API key"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => deleteAgent(a.id, a.agent_name)}
+                            className="text-xs text-text-muted hover:text-danger transition-colors px-2 py-1 rounded-lg hover:bg-danger/5"
+                            title="Delete agent"
+                          >
+                            Delete
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  {a.agent_description && (
-                    <p className="text-sm text-text-muted mb-2">{a.agent_description}</p>
+                  {editingAgent === a.id ? (
+                    <textarea
+                      value={editDesc}
+                      onChange={(e) => setEditDesc(e.target.value)}
+                      maxLength={200}
+                      rows={2}
+                      className="w-full bg-bg-elevated border border-border rounded-lg px-3 py-2 text-sm text-text-muted mb-2 resize-none"
+                      placeholder="Agent description"
+                    />
+                  ) : (
+                    a.agent_description && (
+                      <p className="text-sm text-text-muted mb-2">{a.agent_description}</p>
+                    )
                   )}
                   {a.capabilities && a.capabilities.length > 0 && (
                     <div className="flex flex-wrap gap-1.5">
@@ -826,6 +957,22 @@ export default function AgentsPage() {
                   <div className="mt-3 text-[10px] text-text-muted">
                     ID: <code>{a.id}</code>
                   </div>
+
+                  {/* New API Key display (after regeneration) */}
+                  {newApiKey && editingAgent !== a.id && (
+                    <div className="mt-3 p-3 bg-warning/5 border border-warning/20 rounded-xl">
+                      <p className="text-xs text-warning font-medium mb-1.5">New API Key — save it now, it won&apos;t be shown again:</p>
+                      <div className="flex items-center gap-2">
+                        <code className="text-xs bg-bg-elevated px-2 py-1 rounded-lg flex-1 break-all">{newApiKey}</code>
+                        <button
+                          onClick={() => { navigator.clipboard.writeText(newApiKey); setNewKeyCopied(true); setTimeout(() => setNewKeyCopied(false), 2000); }}
+                          className="text-xs text-text-muted hover:text-text flex items-center gap-1"
+                        >
+                          {newKeyCopied ? <CheckCircle2 className="w-3.5 h-3.5 text-success" /> : <Copy className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

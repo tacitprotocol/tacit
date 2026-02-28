@@ -2,12 +2,17 @@
 
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Settings, Shield, Key, Trash2, ExternalLink } from 'lucide-react';
+import { Settings, Shield, Key, Trash2, ExternalLink, Loader2 } from 'lucide-react';
+import { IndexedDBBackend } from '@/lib/tacit/indexed-db-backend';
 
 export default function SettingsPage() {
   const supabase = createClient();
   const [email, setEmail] = useState('');
   const [did, setDid] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteText, setDeleteText] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -26,6 +31,46 @@ export default function SettingsPage() {
     }
     load();
   }, [supabase]);
+
+  async function handleDeleteAccount() {
+    if (deleteText !== 'DELETE') return;
+    setDeleting(true);
+    setDeleteError(null);
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Delete user data from DB tables
+      await Promise.all([
+        supabase.from('credentials').delete().eq('user_id', user.id),
+        supabase.from('engagement_requests').delete().eq('user_id', user.id),
+        supabase.from('engagement_requests').delete().eq('target_id', user.id),
+        supabase.from('agent_profiles').delete().eq('user_id', user.id),
+        supabase.from('profiles').delete().eq('id', user.id),
+      ]);
+
+      // Clean up IndexedDB private keys
+      const dbNames = ['tacit-identity', 'tacit-keys'];
+      for (const dbName of dbNames) {
+        try {
+          const backend = new IndexedDBBackend(dbName);
+          await backend.close();
+          indexedDB.deleteDatabase(dbName);
+        } catch (e) {
+          console.warn(`Failed to delete IndexedDB "${dbName}":`, e);
+        }
+      }
+
+      // Sign out
+      await supabase.auth.signOut();
+      window.location.href = '/';
+    } catch (e) {
+      console.error('Failed to delete account:', e);
+      setDeleteError('Failed to delete account. Please try again.');
+      setDeleting(false);
+    }
+  }
 
   return (
     <div>
@@ -86,7 +131,7 @@ export default function SettingsPage() {
                 key={label}
                 href={href}
                 target="_blank"
-                rel="noopener"
+                rel="noopener noreferrer"
                 className="flex items-center justify-between p-2 rounded-lg hover:bg-bg-elevated transition-colors text-sm"
               >
                 {label}
@@ -106,9 +151,48 @@ export default function SettingsPage() {
             Deleting your account will permanently remove your profile, credentials,
             and all associated data. Your DID will be revoked.
           </p>
-          <button className="text-sm text-danger border border-danger/30 hover:bg-danger/10 px-4 py-2 rounded-xl transition-colors">
-            Delete Account
-          </button>
+          {deleteError && (
+            <div className="mb-3 p-3 bg-danger/10 border border-danger/30 rounded-xl text-sm text-danger">
+              {deleteError}
+            </div>
+          )}
+          {showDeleteConfirm ? (
+            <div className="space-y-3">
+              <p className="text-sm text-danger font-medium">
+                Type DELETE to confirm account deletion:
+              </p>
+              <input
+                type="text"
+                value={deleteText}
+                onChange={(e) => setDeleteText(e.target.value)}
+                placeholder="Type DELETE"
+                className="w-full bg-bg border border-danger/30 rounded-xl px-4 py-2.5 text-text text-sm focus:outline-none focus:border-danger"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={handleDeleteAccount}
+                  disabled={deleteText !== 'DELETE' || deleting}
+                  className="flex items-center gap-2 text-sm bg-danger hover:bg-danger/90 disabled:opacity-50 text-white px-4 py-2 rounded-xl transition-colors"
+                >
+                  {deleting && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {deleting ? 'Deleting...' : 'Permanently Delete'}
+                </button>
+                <button
+                  onClick={() => { setShowDeleteConfirm(false); setDeleteText(''); }}
+                  className="text-sm text-text-muted hover:text-text px-4 py-2 rounded-xl transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="text-sm text-danger border border-danger/30 hover:bg-danger/10 px-4 py-2 rounded-xl transition-colors"
+            >
+              Delete Account
+            </button>
+          )}
         </div>
       </div>
     </div>
