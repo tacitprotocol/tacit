@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
@@ -9,6 +9,7 @@ import {
   User,
   Compass,
   Users,
+  MessageSquare,
   Settings,
   LogOut,
   Bot,
@@ -22,6 +23,7 @@ const navItems = [
   { href: '/profile', icon: User, label: 'My Identity' },
   { href: '/discover', icon: Compass, label: 'Discover' },
   { href: '/matches', icon: Users, label: 'Matches' },
+  { href: '/messages', icon: MessageSquare, label: 'Messages' },
   { href: '/agents', icon: Bot, label: 'Agent Hub' },
   { href: '/settings', icon: Settings, label: 'Settings' },
 ];
@@ -33,6 +35,54 @@ export function AppSidebar() {
   const router = useRouter();
   const supabase = createClient();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [unreadMessages, setUnreadMessages] = useState(0);
+
+  // Fetch unread message count
+  useEffect(() => {
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    async function loadUnread() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { count } = await supabase
+        .from('messages')
+        .select('id', { count: 'exact', head: true })
+        .eq('receiver_id', user.id)
+        .eq('read', false);
+
+      setUnreadMessages(count || 0);
+
+      // Subscribe to new messages for live badge updates
+      channel = supabase
+        .channel('sidebar-unread')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'messages',
+            filter: `receiver_id=eq.${user.id}`,
+          },
+          () => {
+            // Re-fetch count on any change to messages for this user
+            supabase
+              .from('messages')
+              .select('id', { count: 'exact', head: true })
+              .eq('receiver_id', user.id)
+              .eq('read', false)
+              .then(({ count: c }) => setUnreadMessages(c || 0));
+          }
+        )
+        .subscribe();
+    }
+
+    loadUnread();
+
+    return () => {
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [supabase]);
 
   async function handleSignOut() {
     if (!confirm('Sign out of TACIT? On shared computers, clear your browser data after signing out.')) {
@@ -86,6 +136,11 @@ export function AppSidebar() {
           >
             <Icon className="w-5 h-5" />
             {label}
+            {href === '/messages' && unreadMessages > 0 && (
+              <span className="ml-auto bg-accent text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                {unreadMessages > 99 ? '99+' : unreadMessages}
+              </span>
+            )}
           </Link>
         ))}
       </nav>
