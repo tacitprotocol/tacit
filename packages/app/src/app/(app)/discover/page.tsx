@@ -25,10 +25,14 @@ interface PublicProfile {
   domain: string;
 }
 
+const PAGE_SIZE = 24;
+
 export default function DiscoverPage() {
   const supabase = createClient();
   const [profiles, setProfiles] = useState<PublicProfile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [currentUserId, setCurrentUserId] = useState<string>('');
@@ -37,18 +41,22 @@ export default function DiscoverPage() {
   const [requestedIds, setRequestedIds] = useState<Set<string>>(new Set());
   const [requestError, setRequestError] = useState<string | null>(null);
 
+  async function fetchProfiles(offset: number) {
+    return supabase
+      .from('profiles')
+      .select('id, did, display_name, bio, avatar_url, trust_score, trust_level, seeking, offering, domain')
+      .eq('onboarding_complete', true)
+      .order('trust_score', { ascending: false })
+      .range(offset, offset + PAGE_SIZE - 1);
+  }
+
   useEffect(() => {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) setCurrentUserId(user.id);
 
       const [profilesRes, existingReqs] = await Promise.all([
-        supabase
-          .from('profiles')
-          .select('id, did, display_name, bio, avatar_url, trust_score, trust_level, seeking, offering, domain')
-          .eq('onboarding_complete', true)
-          .order('trust_score', { ascending: false })
-          .limit(50),
+        fetchProfiles(0),
         user ? supabase
           .from('engagement_requests')
           .select('target_id')
@@ -59,7 +67,10 @@ export default function DiscoverPage() {
         console.error('Failed to load profiles:', profilesRes.error.message);
         setLoadError('Failed to load network members. Please refresh the page.');
       }
-      if (profilesRes.data) setProfiles(profilesRes.data);
+      if (profilesRes.data) {
+        setProfiles(profilesRes.data);
+        setHasMore(profilesRes.data.length === PAGE_SIZE);
+      }
       if (existingReqs.data) {
         setRequestedIds(new Set(existingReqs.data.map((r: { target_id: string }) => r.target_id)));
       }
@@ -67,6 +78,18 @@ export default function DiscoverPage() {
     }
     load();
   }, [supabase]);
+
+  async function loadMore() {
+    setLoadingMore(true);
+    const { data, error } = await fetchProfiles(profiles.length);
+    if (error) {
+      console.error('Failed to load more:', error.message);
+    } else if (data) {
+      setProfiles((prev) => [...prev, ...data]);
+      setHasMore(data.length === PAGE_SIZE);
+    }
+    setLoadingMore(false);
+  }
 
   async function requestIntroduction(targetId: string) {
     setRequestingId(targetId);
@@ -144,6 +167,7 @@ export default function DiscoverPage() {
           </p>
         </div>
       ) : (
+        <>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.map((p) => (
             <div
@@ -252,6 +276,21 @@ export default function DiscoverPage() {
             </div>
           ))}
         </div>
+
+        {/* Load More */}
+        {hasMore && !search && (
+          <div className="flex justify-center mt-8">
+            <button
+              onClick={loadMore}
+              disabled={loadingMore}
+              className="flex items-center gap-2 bg-bg-card border border-border hover:border-accent/40 text-text px-6 py-2.5 rounded-xl text-sm font-medium transition-colors disabled:opacity-50"
+            >
+              {loadingMore && <Loader2 className="w-4 h-4 animate-spin" />}
+              {loadingMore ? 'Loading...' : 'Load More Members'}
+            </button>
+          </div>
+        )}
+        </>
       )}
     </div>
   );
