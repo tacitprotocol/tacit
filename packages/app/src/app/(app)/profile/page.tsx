@@ -1,26 +1,75 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { IdentityCard } from '@/components/identity/IdentityCard';
 import { TrustScoreCard } from '@/components/identity/TrustScoreCard';
+import { useToast } from '@/components/ui/Toast';
 import {
   Loader2,
   Save,
   CheckCircle2,
   Github,
   Mail,
+  Camera,
 } from 'lucide-react';
 import type { UserProfile, Credential } from '@/lib/tacit/store';
 
+const MAX_AVATAR_SIZE = 2 * 1024 * 1024; // 2MB
+
+async function compressImage(file: File): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const canvas = document.createElement('canvas');
+      // Resize to max 512x512 while maintaining aspect ratio
+      const maxSize = 512;
+      let w = img.width;
+      let h = img.height;
+      if (w > maxSize || h > maxSize) {
+        if (w > h) {
+          h = Math.round((h / w) * maxSize);
+          w = maxSize;
+        } else {
+          w = Math.round((w / h) * maxSize);
+          h = maxSize;
+        }
+      }
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { reject(new Error('Canvas not supported')); return; }
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob(
+        (blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error('Failed to compress image'));
+        },
+        'image/jpeg',
+        0.85
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Failed to load image'));
+    };
+    img.src = url;
+  });
+}
+
 export default function ProfilePage() {
   const supabase = createClient();
+  const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [credentials, setCredentials] = useState<Credential[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   // Editable fields
   const [displayName, setDisplayName] = useState('');
@@ -71,11 +120,82 @@ export default function ProfilePage() {
     if (error) {
       console.error('Failed to save profile:', error.message);
       setSaveError('Failed to save changes. Please try again.');
+      toast('Failed to save changes', 'error');
     } else {
       setSaved(true);
       setProfile({ ...profile, display_name: displayName, bio, seeking, offering });
+      toast('Profile saved successfully', 'success');
       setTimeout(() => setSaved(false), 2000);
     }
+  }
+
+  async function handleAvatarUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !profile) return;
+
+    // Reset file input so same file can be re-selected
+    if (fileInputRef.current) fileInputRef.current.value = '';
+
+    if (!file.type.startsWith('image/')) {
+      toast('Please select an image file', 'error');
+      return;
+    }
+
+    if (file.size > MAX_AVATAR_SIZE * 2) {
+      // Allow up to 4MB raw, we compress it down
+      toast('Image is too large. Maximum size is 4MB.', 'error');
+      return;
+    }
+
+    setUploadingAvatar(true);
+
+    try {
+      // Compress/resize image
+      const compressed = await compressImage(file);
+
+      // Upload to Supabase Storage
+      const filePath = `${profile.id}/avatar.jpg`;
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, compressed, {
+          contentType: 'image/jpeg',
+          upsert: true,
+        });
+
+      if (uploadError) {
+        console.error('Avatar upload failed:', uploadError.message);
+        toast('Failed to upload avatar. Please try again.', 'error');
+        setUploadingAvatar(false);
+        return;
+      }
+
+      // Get the public URL
+      const { data: urlData } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath);
+
+      // Add cache-bust to force refresh
+      const avatarUrl = `${urlData.publicUrl}?t=${Date.now()}`;
+
+      // Update the profile record
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ avatar_url: avatarUrl, updated_at: new Date().toISOString() })
+        .eq('id', profile.id);
+
+      if (updateError) {
+        console.error('Failed to update avatar URL:', updateError.message);
+        toast('Avatar uploaded but failed to update profile.', 'error');
+      } else {
+        setProfile({ ...profile, avatar_url: avatarUrl });
+        toast('Avatar updated successfully', 'success');
+      }
+    } catch (err) {
+      console.error('Avatar upload error:', err);
+      toast('Failed to process image. Please try a different file.', 'error');
+    }
+
+    setUploadingAvatar(false);
   }
 
   async function connectProvider(provider: 'google' | 'github') {
@@ -128,6 +248,48 @@ export default function ProfilePage() {
           <div className="bg-bg-card border border-border rounded-2xl p-6">
             <h3 className="font-semibold mb-4">Edit Profile</h3>
             <div className="space-y-4">
+              {/* Avatar Upload */}
+              <div className="flex items-center gap-4">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploadingAvatar}
+                  className="relative w-16 h-16 rounded-2xl bg-bg-elevated border-2 border-border hover:border-accent/50 transition-colors overflow-hidden group shrink-0"
+                >
+                  {profile.avatar_url ? (
+                    <img
+                      src={profile.avatar_url}
+                      alt={profile.display_name}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="flex items-center justify-center w-full h-full text-xl font-bold text-text-muted">
+                      {displayName.charAt(0).toUpperCase() || '?'}
+                    </span>
+                  )}
+                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    {uploadingAvatar ? (
+                      <Loader2 className="w-5 h-5 text-white animate-spin" />
+                    ) : (
+                      <Camera className="w-5 h-5 text-white" />
+                    )}
+                  </div>
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleAvatarUpload}
+                  className="hidden"
+                />
+                <div>
+                  <p className="text-sm font-medium">Profile Photo</p>
+                  <p className="text-xs text-text-muted">
+                    Click to upload. JPG, PNG, or GIF. Max 2MB.
+                  </p>
+                </div>
+              </div>
+
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-sm font-medium">Display Name</label>

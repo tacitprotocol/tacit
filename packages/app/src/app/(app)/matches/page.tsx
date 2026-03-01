@@ -14,6 +14,7 @@ import {
   Clock,
 } from 'lucide-react';
 import Link from 'next/link';
+import { useToast } from '@/components/ui/Toast';
 
 interface MatchRequest {
   id: string;
@@ -43,6 +44,7 @@ export default function MatchesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
     loadMatches();
@@ -90,9 +92,14 @@ export default function MatchesPage() {
 
     if (updateError) {
       setError(`Failed to ${status === 'accepted' ? 'accept' : 'decline'} request.`);
+      toast(`Failed to ${status === 'accepted' ? 'accept' : 'decline'} request`, 'error');
     } else {
       setIncoming((prev) =>
         prev.map((r) => (r.id === requestId ? { ...r, status } : r))
+      );
+      toast(
+        status === 'accepted' ? 'Match accepted! You can now message them.' : 'Request declined.',
+        status === 'accepted' ? 'success' : 'info'
       );
     }
     setActionLoading(null);

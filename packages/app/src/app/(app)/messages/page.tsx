@@ -1,6 +1,11 @@
 'use client';
 
 /*
+ * ============================================================================
+ * SETUP REQUIRED: Run the SQL below in Supabase SQL Editor before using
+ * the messaging feature. Without this table, messages will not persist.
+ * ============================================================================
+ *
  * Supabase table schema for `messages`:
  *
  * CREATE TABLE messages (
@@ -55,6 +60,7 @@ import {
   Shield,
 } from 'lucide-react';
 import Link from 'next/link';
+import { useToast } from '@/components/ui/Toast';
 
 interface ConversationProfile {
   display_name: string;
@@ -97,6 +103,7 @@ export default function MessagesPage() {
   const [sending, setSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const { toast } = useToast();
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -311,6 +318,7 @@ export default function MessagesPage() {
     if (sendError) {
       console.error('Failed to send message:', sendError.message);
       setError('Failed to send message. Please try again.');
+      toast('Failed to send message', 'error');
       setMessageText(content); // Restore the message text
     }
 

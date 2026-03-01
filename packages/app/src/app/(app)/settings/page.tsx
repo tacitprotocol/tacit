@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { Settings, Shield, Key, Trash2, ExternalLink, Loader2 } from 'lucide-react';
 import { IndexedDBBackend } from '@/lib/tacit/indexed-db-backend';
+import { useToast } from '@/components/ui/Toast';
 
 export default function SettingsPage() {
   const supabase = createClient();
@@ -13,6 +14,7 @@ export default function SettingsPage() {
   const [deleteText, setDeleteText] = useState('');
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
     async function load() {
@@ -68,6 +70,7 @@ export default function SettingsPage() {
     } catch (e) {
       console.error('Failed to delete account:', e);
       setDeleteError('Failed to delete account. Please try again.');
+      toast('Failed to delete account', 'error');
       setDeleting(false);
     }
   }
