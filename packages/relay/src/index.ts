@@ -14,6 +14,7 @@
  */
 
 import { WebSocketServer, WebSocket } from 'ws';
+import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { v4 as uuidv4 } from 'uuid';
 import { AgentRegistry } from './registry.js';
 import { IntentIndex } from './intent-index.js';
@@ -52,6 +53,7 @@ interface Envelope {
 // ─── Relay Server ────────────────────────────────────────────────
 
 export class TacitRelay {
+  private httpServer: ReturnType<typeof createServer> | null = null;
   private wss: WebSocketServer | null = null;
   private agents = new Map<string, ConnectedAgent>();
   private didToConnectionId = new Map<string, string>();
@@ -80,12 +82,30 @@ export class TacitRelay {
   // ─── Lifecycle ─────────────────────────────────────────────
 
   start(): void {
-    this.wss = new WebSocketServer({
-      port: this.config.port,
-      host: this.config.host,
+    // HTTP server for health checks and future REST endpoints
+    this.httpServer = createServer((req: IncomingMessage, res: ServerResponse) => {
+      if (req.url === '/health' || req.url === '/') {
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        });
+        res.end(JSON.stringify({
+          status: 'ok',
+          version: '0.1.0',
+          uptime: process.uptime(),
+          ...this.stats,
+        }));
+        return;
+      }
+      res.writeHead(404);
+      res.end('Not found');
     });
 
-    console.log(`[Tacit Relay] Listening on ws://${this.config.host}:${this.config.port}`);
+    this.wss = new WebSocketServer({ server: this.httpServer });
+
+    this.httpServer.listen(this.config.port, this.config.host, () => {
+      console.log(`[Tacit Relay] Listening on ${this.config.host}:${this.config.port}`);
+    });
 
     this.wss.on('connection', (ws, req) => {
       const ip = req.socket.remoteAddress ?? 'unknown';
@@ -147,6 +167,8 @@ export class TacitRelay {
 
     this.wss?.close();
     this.wss = null;
+    this.httpServer?.close();
+    this.httpServer = null;
     console.log('[Tacit Relay] Stopped');
   }
 

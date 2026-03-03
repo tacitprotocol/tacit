@@ -10,6 +10,9 @@ import {
   Users,
   Loader2,
   Send,
+  Filter,
+  ArrowUpDown,
+  X,
 } from 'lucide-react';
 
 interface PublicProfile {
@@ -40,6 +43,10 @@ export default function DiscoverPage() {
   const [requestingId, setRequestingId] = useState<string | null>(null);
   const [requestedIds, setRequestedIds] = useState<Set<string>>(new Set());
   const [requestError, setRequestError] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<'trust' | 'newest'>('trust');
+  const [domainFilter, setDomainFilter] = useState<string>('all');
+  const [trustFilter, setTrustFilter] = useState<string>('all');
+  const [showFilters, setShowFilters] = useState(false);
 
   async function fetchProfiles(offset: number) {
     return supabase
@@ -113,17 +120,31 @@ export default function DiscoverPage() {
     setRequestingId(null);
   }
 
-  const filtered = profiles.filter((p) => {
-    if (p.id === currentUserId) return false;
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      p.display_name.toLowerCase().includes(q) ||
-      p.bio?.toLowerCase().includes(q) ||
-      p.seeking?.toLowerCase().includes(q) ||
-      p.offering?.toLowerCase().includes(q)
-    );
-  });
+  // Get unique domains for filter dropdown
+  const domains = [...new Set(profiles.map(p => p.domain).filter(Boolean))].sort();
+
+  const filtered = profiles
+    .filter((p) => {
+      if (p.id === currentUserId) return false;
+      if (domainFilter !== 'all' && p.domain !== domainFilter) return false;
+      if (trustFilter === 'high' && p.trust_score < 50) return false;
+      if (trustFilter === 'verified' && !['trusted', 'exemplary'].includes(p.trust_level)) return false;
+      if (!search) return true;
+      const q = search.toLowerCase();
+      return (
+        p.display_name.toLowerCase().includes(q) ||
+        p.bio?.toLowerCase().includes(q) ||
+        p.seeking?.toLowerCase().includes(q) ||
+        p.offering?.toLowerCase().includes(q) ||
+        p.domain?.toLowerCase().includes(q)
+      );
+    })
+    .sort((a, b) => {
+      if (sortBy === 'newest') return 0; // DB already sorted, maintain order
+      return b.trust_score - a.trust_score;
+    });
+
+  const activeFilterCount = [domainFilter !== 'all', trustFilter !== 'all'].filter(Boolean).length;
 
   return (
     <div>
@@ -138,16 +159,90 @@ export default function DiscoverPage() {
         </div>
       )}
 
-      {/* Search */}
-      <div className="relative mb-6">
-        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by name, skills, or what people are seeking..."
-          className="w-full bg-bg-card border border-border rounded-xl pl-12 pr-4 py-3 text-text focus:outline-none focus:border-accent"
-        />
+      {/* Search + Filters */}
+      <div className="space-y-3 mb-6">
+        <div className="flex gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-text-muted" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name, skills, domain, or what people are seeking..."
+              className="w-full bg-bg-card border border-border rounded-xl pl-12 pr-4 py-3 text-text focus:outline-none focus:border-accent"
+            />
+          </div>
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium transition-colors ${
+              showFilters || activeFilterCount > 0
+                ? 'bg-accent/10 border-accent/30 text-accent-bright'
+                : 'bg-bg-card border-border text-text-muted hover:text-text hover:border-border-bright'
+            }`}
+          >
+            <Filter className="w-4 h-4" />
+            Filters
+            {activeFilterCount > 0 && (
+              <span className="bg-accent text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* Filter bar */}
+        {showFilters && (
+          <div className="flex flex-wrap items-center gap-3 bg-bg-card border border-border rounded-xl p-4">
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-text-muted font-medium">Domain:</label>
+              <select
+                value={domainFilter}
+                onChange={(e) => setDomainFilter(e.target.value)}
+                className="bg-bg border border-border rounded-lg px-3 py-1.5 text-sm text-text focus:outline-none focus:border-accent"
+              >
+                <option value="all">All Domains</option>
+                {domains.map(d => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-text-muted font-medium">Trust:</label>
+              <select
+                value={trustFilter}
+                onChange={(e) => setTrustFilter(e.target.value)}
+                className="bg-bg border border-border rounded-lg px-3 py-1.5 text-sm text-text focus:outline-none focus:border-accent"
+              >
+                <option value="all">Any Level</option>
+                <option value="high">Score 50+</option>
+                <option value="verified">Trusted/Exemplary</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-text-muted font-medium">Sort:</label>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as 'trust' | 'newest')}
+                className="bg-bg border border-border rounded-lg px-3 py-1.5 text-sm text-text focus:outline-none focus:border-accent"
+              >
+                <option value="trust">Highest Trust</option>
+                <option value="newest">Newest First</option>
+              </select>
+            </div>
+
+            {activeFilterCount > 0 && (
+              <button
+                onClick={() => { setDomainFilter('all'); setTrustFilter('all'); }}
+                className="flex items-center gap-1 text-xs text-accent hover:text-accent-bright transition-colors ml-auto"
+              >
+                <X className="w-3 h-3" />
+                Clear filters
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {loading ? (

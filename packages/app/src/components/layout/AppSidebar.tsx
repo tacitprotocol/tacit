@@ -10,6 +10,7 @@ import {
   Compass,
   Users,
   MessageSquare,
+  Bell,
   Settings,
   LogOut,
   Bot,
@@ -24,6 +25,7 @@ const navItems = [
   { href: '/discover', icon: Compass, label: 'Discover' },
   { href: '/matches', icon: Users, label: 'Matches' },
   { href: '/messages', icon: MessageSquare, label: 'Messages' },
+  { href: '/notifications', icon: Bell, label: 'Notifications' },
   { href: '/agents', icon: Bot, label: 'Agent Hub' },
   { href: '/settings', icon: Settings, label: 'Settings' },
 ];
@@ -36,26 +38,36 @@ export function AppSidebar() {
   const supabase = createClient();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState(0);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
 
-  // Fetch unread message count
+  // Fetch unread message + notification counts
   useEffect(() => {
-    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let msgChannel: ReturnType<typeof supabase.channel> | null = null;
+    let notifChannel: ReturnType<typeof supabase.channel> | null = null;
 
     async function loadUnread() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { count } = await supabase
-        .from('messages')
-        .select('id', { count: 'exact', head: true })
-        .eq('receiver_id', user.id)
-        .eq('read', false);
+      const [msgRes, notifRes] = await Promise.all([
+        supabase
+          .from('messages')
+          .select('id', { count: 'exact', head: true })
+          .eq('receiver_id', user.id)
+          .eq('read', false),
+        supabase
+          .from('notifications')
+          .select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id)
+          .eq('read', false),
+      ]);
 
-      setUnreadMessages(count || 0);
+      setUnreadMessages(msgRes.count || 0);
+      setUnreadNotifications(notifRes.count || 0);
 
       // Subscribe to new messages for live badge updates
-      channel = supabase
-        .channel('sidebar-unread')
+      msgChannel = supabase
+        .channel('sidebar-unread-messages')
         .on(
           'postgres_changes',
           {
@@ -65,7 +77,6 @@ export function AppSidebar() {
             filter: `receiver_id=eq.${user.id}`,
           },
           () => {
-            // Re-fetch count on any change to messages for this user
             supabase
               .from('messages')
               .select('id', { count: 'exact', head: true })
@@ -75,12 +86,35 @@ export function AppSidebar() {
           }
         )
         .subscribe();
+
+      // Subscribe to notifications for live badge updates
+      notifChannel = supabase
+        .channel('sidebar-unread-notifications')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'notifications',
+            filter: `user_id=eq.${user.id}`,
+          },
+          () => {
+            supabase
+              .from('notifications')
+              .select('id', { count: 'exact', head: true })
+              .eq('user_id', user.id)
+              .eq('read', false)
+              .then(({ count: c }) => setUnreadNotifications(c || 0));
+          }
+        )
+        .subscribe();
     }
 
     loadUnread();
 
     return () => {
-      if (channel) supabase.removeChannel(channel);
+      if (msgChannel) supabase.removeChannel(msgChannel);
+      if (notifChannel) supabase.removeChannel(notifChannel);
     };
   }, [supabase]);
 
@@ -139,6 +173,11 @@ export function AppSidebar() {
             {href === '/messages' && unreadMessages > 0 && (
               <span className="ml-auto bg-accent text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
                 {unreadMessages > 99 ? '99+' : unreadMessages}
+              </span>
+            )}
+            {href === '/notifications' && unreadNotifications > 0 && (
+              <span className="ml-auto bg-accent text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                {unreadNotifications > 99 ? '99+' : unreadNotifications}
               </span>
             )}
           </Link>
